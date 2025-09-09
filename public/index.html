@@ -46,6 +46,7 @@
         });
 
         const data = await res.json();
+
         if (data.error) {
           alert("Erro: " + data.error);
           return;
@@ -60,7 +61,6 @@
         if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
-        // Polling para checar status
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
