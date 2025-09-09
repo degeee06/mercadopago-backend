@@ -1,61 +1,50 @@
 import express from "express";
-import bodyParser from "body-parser";
-import fetch from "node-fetch";
+import cors from "cors";
+import mercadopago from "mercadopago";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors());
+app.use(express.json());
 
-// Configurar __dirname com ES Modules
+// Configura token via variável de ambiente
+mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
+
+// Frontend
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, "public")));
 
-// Servir arquivos estáticos da raiz do projeto
-app.use(express.static(__dirname));
-
-// Configuração do body-parser
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-// Rota de teste do backend
-app.get("/api/test", (req, res) => {
-  res.json({ message: "Backend funcionando!" });
-});
-
-// Rota de pagamento Pix Mercado Pago
-app.post("/api/pix", async (req, res) => {
-  const { amount, description } = req.body;
-
+// Endpoint PIX
+app.post("/create-pix", async (req, res) => {
+  const { amount, description, email } = req.body;
   try {
-    const response = await fetch("https://api.mercadopago.com/v1/payments", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer TEST-6172816457651620-090719-ef2ac7e7628cc5b8a64d2ca1ddf89c61-469548398`,
-      },
-      body: JSON.stringify({
-        transaction_amount: amount,
-        description: description,
-        payment_method_id: "pix",
-        payer: {
-          email: "teste@teste.com",
-        },
-      }),
-    });
+    const paymentData = {
+      transaction_amount: Number(amount),
+      description: description || "Pagamento PIX",
+      payment_method_id: "pix",
+      payer: { email: email || "teste@cliente.com" }
+    };
 
-    const data = await response.json();
-    res.json(data);
+    const payment = await mercadopago.payment.create(paymentData);
+
+    res.json({
+      id: payment.body.id,
+      status: payment.body.status,
+      qr_code: payment.body.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: payment.body.point_of_interaction.transaction_data.qr_code_base64
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Rota fallback para index.html
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+// Serve frontend
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Servidor rodando!");
 });
