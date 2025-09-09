@@ -26,7 +26,7 @@
   <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
-    const customerEmail = "amorimmm60@gmail.com";
+    const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
     let currentPaymentId = null;
     let statusInterval = null;
 
@@ -40,11 +40,11 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ amount, description: "Pagamento VIP", email: customerEmail })
         });
-
         const data = await res.json();
         if (data.error) return alert("Erro: " + data.error);
 
         currentPaymentId = data.id;
+
         document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" />`;
         document.getElementById("pixCode").innerText = data.qr_code;
         document.getElementById("copiar").style.display = "inline-block";
@@ -52,7 +52,7 @@
         if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
-        // Polling somente do Supabase
+        // Polling para checar status do Supabase
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
@@ -61,23 +61,21 @@
     }
 
     async function checkStatus() {
-  if (!currentPaymentId) return;
+      if (!currentPaymentId) return;
+      try {
+        const res = await fetch(`/status-pix/${currentPaymentId}`);
+        const data = await res.json();
 
-  try {
-    const res = await fetch(`/status-pix/${currentPaymentId}`);
-    const data = await res.json();
-
-    if (data.status === "approved") {
-      setStatus("approved", "Pagamento aprovado ✅");
-      clearInterval(statusInterval);
-    } else {
-      setStatus("pending", "Aguardando pagamento...");
+        if (data.status === "approved") {
+          setStatus("approved", "Pagamento aprovado ✅");
+          clearInterval(statusInterval);
+        } else {
+          setStatus("pending", "Aguardando pagamento...");
+        }
+      } catch (err) {
+        console.error("Erro ao checar status:", err);
+      }
     }
-  } catch (err) {
-    console.error("Erro ao checar status:", err);
-  }
-}
-
 
     function setStatus(className, text) {
       const statusEl = document.getElementById("status");
@@ -93,4 +91,3 @@
   </script>
 </body>
 </html>
-
