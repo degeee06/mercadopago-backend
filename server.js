@@ -3,6 +3,7 @@ import cors from "cors";
 import mercadopago from "mercadopago";
 import path from "path";
 import { fileURLToPath } from "url";
+import crypto from "crypto";
 
 const app = express();
 app.use(cors());
@@ -24,7 +25,7 @@ const mp = new MercadoPagoConfig({
 });
 const payment = new Payment(mp);
 
-// Armazena status de pagamentos em memória (temporário)
+// Armazena status de pagamentos temporariamente
 const pagamentos = {};
 
 // Endpoint para criar PIX
@@ -61,16 +62,24 @@ app.get("/status-pix/:id", (req, res) => {
   res.json({ status });
 });
 
-// Webhook do Mercado Pago com validação de assinatura
+// Webhook do Mercado Pago com validação HMAC
 app.post("/webhook", async (req, res) => {
   const topic = req.query.topic;
   const id = req.query.id;
 
-  // Validação da assinatura do webhook
-  const signature = req.headers["x-meli-signature"] || req.headers["x-signature"];
-  const secret = process.env.MP_WEBHOOK_SECRET; // chave secreta PROD
+  const signature = req.headers["x-meli-signature"];
+  const secret = process.env.MP_WEBHOOK_SECRET;
 
-  if (!signature || signature !== secret) {
+  if (!signature || !secret) {
+    console.log("Webhook inválido! Sem assinatura ou segredo.");
+    return res.sendStatus(401);
+  }
+
+  // Calcula HMAC-SHA256 do body com o segredo
+  const hmac = crypto.createHmac("sha256", secret);
+  const digest = hmac.update(JSON.stringify(req.body)).digest("base64");
+
+  if (signature !== digest) {
     console.log("Webhook inválido! Assinatura não conferiu.");
     return res.sendStatus(401);
   }
@@ -86,12 +95,13 @@ app.post("/webhook", async (req, res) => {
       pagamentos[id] = paymentDetails.status; // atualiza status
 
       // Aqui você pode liberar VIP ou atualizar banco
+      // Exemplo: liberarVIP(paymentDetails.payer.email)
     }
   } catch (err) {
     console.error("Erro ao buscar detalhes do pagamento:", err.message);
   }
 
-  res.sendStatus(200);
+  res.sendStatus(200); // retorna 200 para o Mercado Pago
 });
 
 // Inicia servidor
