@@ -8,8 +8,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configura token via variável de ambiente
-mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
+// Inicializa Mercado Pago (SDK 2025)
+const mp = new mercadopago.MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN
+});
+
+// Criador de pagamentos
+const payment = new mercadopago.Payment(mp);
 
 // Frontend
 const __filename = fileURLToPath(import.meta.url);
@@ -27,13 +32,13 @@ app.post("/create-pix", async (req, res) => {
       payer: { email: email || "teste@cliente.com" }
     };
 
-    const payment = await mercadopago.payment.create(paymentData);
+    const result = await payment.create({ body: paymentData });
 
     res.json({
-      id: payment.body.id,
-      status: payment.body.status,
-      qr_code: payment.body.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: payment.body.point_of_interaction.transaction_data.qr_code_base64
+      id: result.id,
+      status: result.status,
+      qr_code: result.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
