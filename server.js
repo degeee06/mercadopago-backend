@@ -86,27 +86,33 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   try {
   const paymentId = req.body?.data?.id || req.query.id;
-  const status = req.body?.data?.status; // Status real enviado pelo Webhook
-
   if (!paymentId) return res.sendStatus(400);
 
-  // Atualiza Supabase somente se o pagamento estiver realmente aprovado
-  if (status === "approved" || status === "paid") {
-    await supabase.from("pagamentos")
-      .update({ status: "approved" })
-      .eq("id", paymentId);
+  // Busca o status real do pagamento via SDK
+  try {
+    const paymentDetails = await payment.get(paymentId);
+    const status = paymentDetails.body.status; // approved, pending, rejected, etc.
 
-    console.log("Status atualizado pelo Webhook:", "approved");
-  } else {
-    console.log("Pagamento ainda pendente:", paymentId, status);
+    if (status === "approved") {
+      await supabase.from("pagamentos")
+        .update({ status: "approved" })
+        .eq("id", paymentId);
+
+      console.log("Status atualizado pelo Webhook:", status);
+    } else {
+      console.log("Pagamento ainda pendente:", paymentId, status);
+    }
+
+  } catch (err) {
+    console.error("Erro ao buscar status real do pagamento:", err.message);
   }
+
 } catch (err) {
-  console.error("Erro ao atualizar pagamento:", err.message);
+  console.error("Erro ao processar Webhook:", err.message);
 }
 
+res.sendStatus(200);
 
-  res.sendStatus(200);
-});
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
