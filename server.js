@@ -38,7 +38,7 @@ app.post("/create-pix", async (req, res) => {
         transaction_amount: Number(amount),
         description: description || "Pagamento VIP",
         payment_method_id: "pix",
-        payer: { email: email }
+        payer: { email }
       }
     });
 
@@ -55,58 +55,65 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Endpoint para checar status do pagamento (polling frontend)
+// Endpoint para checar status do pagamento (frontend faz polling)
 app.get("/status-pix/:id", (req, res) => {
   const id = req.params.id;
   const status = pagamentos[id] || "pending";
   res.json({ status });
 });
 
-// Webhook do Mercado Pago (produção) com HMAC correto
+// Webhook de produção com validação HMAC SHA256
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
-  const topic = req.query.topic; // "payment" ou "merchant_order"
-  const id = req.query.id;       // ID do pagamento ou pedido
-
-  const signature = req.headers["x-meli-signature"];
+  const xSignature = req.headers["x-signature"];
+  const xRequestId = req.headers["x-request-id"];
+  const queryParams = req.query;
   const secret = process.env.MP_WEBHOOK_SECRET;
 
-  if (!signature || !secret) {
+  if (!xSignature || !xRequestId || !secret) {
     console.log("Webhook inválido! Sem assinatura ou segredo.");
     return res.sendStatus(401);
   }
 
-  // Calcula HMAC-SHA256 do body RAW
-  const hmac = crypto.createHmac("sha256", secret);
-  const digest = hmac.update(req.body).digest("base64");
+  // Extrai ts e v1
+  const parts = xSignature.split(",");
+  let ts = "", v1 = "";
+  for (const part of parts) {
+    const [key, value] = part.split("=");
+    if (key === "ts") ts = value;
+    if (key === "v1") v1 = value;
+  }
 
-  if (signature !== digest) {
+  // data.id vem da query param, precisa ser minúsculo
+  const dataId = (queryParams["data.id"] || "").toLowerCase();
+
+  // Monta manifest
+  const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+
+  // Calcula HMAC SHA256 hexadecimal
+  const hmac = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+
+  if (hmac !== v1) {
     console.log("Webhook inválido! Assinatura não conferiu.");
     return res.sendStatus(401);
   }
 
-  console.log("=== Webhook validado ===");
-  console.log("Topic:", topic, "ID:", id);
+  console.log("=== Webhook validado ✅ ===");
+  console.log("Topic:", queryParams.topic || "payment", "ID:", dataId);
 
   try {
-    if (topic === "payment") {
-      // Consulta detalhes do pagamento usando token de produção
-      const paymentDetails = await mp.payment.findById(id);
-      console.log("Detalhes do pagamento:", paymentDetails);
+    // Busca detalhes do pagamento para atualizar status
+    const paymentDetails = await mp.payment.findById(dataId);
+    pagamentos[dataId] = paymentDetails.status;
 
-      // Atualiza status temporário ou banco
-      pagamentos[id] = paymentDetails.status;
-
-      // Aqui você pode liberar VIP ou atualizar seu sistema
-      // Exemplo: liberarVIP(paymentDetails.payer.email)
-    }
+    console.log("Status atualizado:", paymentDetails.status);
+    // Aqui você pode liberar VIP ou atualizar banco
+    // Ex: liberarVIP(paymentDetails.payer.email)
   } catch (err) {
     console.error("Erro ao buscar detalhes do pagamento:", err.message);
   }
 
-  // Retorna 200 para Mercado Pago
-  res.sendStatus(200);
+  res.sendStatus(200); // retorna 200 para o Mercado Pago
 });
-
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
