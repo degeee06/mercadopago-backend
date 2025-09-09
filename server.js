@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Servir arquivos estáticos da pasta 'public'
-app.use(express.static(path.join(__dirname, "public")));
+// Servir arquivos estáticos da raiz do projeto
+app.use(express.static(__dirname));
 
 // Configuração do body-parser
 app.use(bodyParser.json());
@@ -23,7 +23,7 @@ app.get("/api/test", (req, res) => {
   res.json({ message: "Backend funcionando!" });
 });
 
-// Exemplo de rota de pagamento Pix Mercado Pago
+// Rota de pagamento Pix Mercado Pago
 app.post("/api/pix", async (req, res) => {
   const { amount, description } = req.body;
 
@@ -51,9 +51,9 @@ app.post("/api/pix", async (req, res) => {
   }
 });
 
-// Servir index.html em qualquer rota não encontrada (opcional)
+// Rota fallback para index.html
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
 app.listen(PORT, () => {
