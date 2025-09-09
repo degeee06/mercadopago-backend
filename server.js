@@ -85,19 +85,25 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   if (computedHash !== v1) return res.sendStatus(401);
 
   try {
-    const paymentId = req.body?.data?.id || req.query.id;
-    if (!paymentId) return res.sendStatus(400);
+  const paymentId = req.body?.data?.id || req.query.id;
+  const status = req.body?.data?.status; // Status real enviado pelo Webhook
 
-    // Atualiza apenas via Webhook
+  if (!paymentId) return res.sendStatus(400);
+
+  // Atualiza Supabase somente se o pagamento estiver realmente aprovado
+  if (status === "approved" || status === "paid") {
     await supabase.from("pagamentos")
       .update({ status: "approved" })
       .eq("id", paymentId);
 
     console.log("Status atualizado pelo Webhook:", "approved");
-
-  } catch (err) {
-    console.error("Erro ao atualizar pagamento:", err.message);
+  } else {
+    console.log("Pagamento ainda pendente:", paymentId, status);
   }
+} catch (err) {
+  console.error("Erro ao atualizar pagamento:", err.message);
+}
+
 
   res.sendStatus(200);
 });
