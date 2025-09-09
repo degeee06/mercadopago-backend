@@ -8,7 +8,7 @@
     input, button { padding: 10px; margin: 10px; width: 90%; }
     #qr img { margin-top: 20px; max-width: 300px; }
     #pixCode { margin-top: 10px; word-wrap: break-word; font-size: 14px; color: #333; }
-    #status { margin-top: 15px; font-weight: bold; color: green; }
+    #status { margin-top: 15px; font-weight: bold; }
     #status.pending { color: orange; }
     #status.approved { color: green; }
     #status.rejected { color: red; }
@@ -46,7 +46,6 @@
         });
 
         const data = await res.json();
-
         if (data.error) {
           alert("Erro: " + data.error);
           return;
@@ -59,7 +58,7 @@
         document.getElementById("copiar").style.display = "inline-block";
 
         if (statusInterval) clearInterval(statusInterval);
-        setStatus("pending");
+        setStatus("pending", "Aguardando pagamento...");
 
         // Polling para checar status
         statusInterval = setInterval(checkStatus, 3000);
