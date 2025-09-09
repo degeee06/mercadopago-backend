@@ -70,6 +70,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
+  // Validação HMAC
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -90,16 +91,17 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     const paymentId = req.body?.data?.id || req.query.id;
     if (!paymentId) return res.sendStatus(400);
 
-    const statusWebhook = req.body?.data?.status || "pending";
+    // Busca status atualizado via API do Mercado Pago
+    const paymentDetails = await payment.get(paymentId);
+    const status = paymentDetails.body.status;
 
-    // Atualiza status no Supabase
+    // Atualiza no Supabase
     await supabase.from("pagamentos")
-      .update({ status: statusWebhook })
+      .update({ status })
       .eq("id", paymentId);
 
-    console.log("Status atualizado pelo Webhook:", statusWebhook);
+    console.log("Status atualizado pelo Webhook:", status);
 
-    console.log("Status atualizado:", paymentDetails.body.status);
   } catch (err) {
     console.error("Erro ao atualizar pagamento:", err.message);
   }
