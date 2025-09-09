@@ -70,7 +70,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
-  // Validação HMAC
+  // Validação HMAC (igual antes)
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -78,7 +78,6 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     if (key === "ts") ts = value;
     else if (key === "v1") v1 = value;
   }
-
   const dataId = (req.query["data.id"] || "").toLowerCase();
   const xRequestId = req.headers["x-request-id"] || "";
   const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
@@ -91,16 +90,12 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     const paymentId = req.body?.data?.id || req.query.id;
     if (!paymentId) return res.sendStatus(400);
 
-    // Busca status atualizado via API do Mercado Pago
-    const paymentDetails = await payment.get(paymentId);
-    const status = paymentDetails.body.status;
-
-    // Atualiza no Supabase
+    // Atualiza no Supabase diretamente, sem chamar Payment.get()
     await supabase.from("pagamentos")
-      .update({ status })
+      .update({ status: "approved" })
       .eq("id", paymentId);
 
-    console.log("Status atualizado pelo Webhook:", status);
+    console.log("Status atualizado pelo Webhook:", "approved");
 
   } catch (err) {
     console.error("Erro ao atualizar pagamento:", err.message);
@@ -108,6 +103,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   res.sendStatus(200);
 });
+
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
