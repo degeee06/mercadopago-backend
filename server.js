@@ -90,12 +90,14 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     const paymentId = req.body?.data?.id || req.query.id;
     if (!paymentId) return res.sendStatus(400);
 
-    const paymentDetails = await payment.get(paymentId);
+    const statusWebhook = req.body?.data?.status || "pending";
 
     // Atualiza status no Supabase
     await supabase.from("pagamentos")
-      .update({ status: paymentDetails.body.status })
+      .update({ status: statusWebhook })
       .eq("id", paymentId);
+
+    console.log("Status atualizado pelo Webhook:", statusWebhook);
 
     console.log("Status atualizado:", paymentDetails.body.status);
   } catch (err) {
