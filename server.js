@@ -18,8 +18,10 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
-// Inicializa Mercado Pago (Produção)
-mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
+// Inicializa Mercado Pago (Produção) - versão antiga, funcional
+mercadopago.configure({
+  access_token: process.env.MP_ACCESS_TOKEN
+});
 
 // Armazena status de pagamentos temporariamente
 const pagamentos = {};
@@ -50,14 +52,14 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Endpoint para checar status do pagamento (frontend faz polling)
+// Endpoint para checar status do pagamento
 app.get("/status-pix/:id", (req, res) => {
   const id = req.params.id;
   const status = pagamentos[id] || "pending";
   res.json({ status });
 });
 
-// Webhook Mercado Pago (produção) com HMAC
+// Webhook Mercado Pago com validação HMAC
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
@@ -95,15 +97,11 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   try {
     if (dataId) {
-      // Consulta pagamento usando o SDK
       const paymentDetails = await mercadopago.payment.get(dataId);
       console.log("Detalhes do pagamento:", paymentDetails.body);
 
-      // Atualiza o status do pagamento para o polling frontend
+      // Atualiza o status do pagamento
       pagamentos[dataId] = paymentDetails.body.status;
-
-      // Aqui você pode liberar VIP ou atualizar banco
-      // Ex: liberarVIP(paymentDetails.body.payer.email)
     }
   } catch (err) {
     console.error("Erro ao buscar detalhes do pagamento:", err.message);
