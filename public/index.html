@@ -52,7 +52,7 @@
         if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
-        // Polling do Supabase para status real
+        // Polling somente do Supabase
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
@@ -61,21 +61,22 @@
     }
 
     async function checkStatus() {
-  if (!currentPaymentId) return;
-  try {
-    const res = await fetch(`/status-pix/${currentPaymentId}`);
-    const data = await res.json();
-    if (data.status === "approved") {
-      setStatus("approved", "Pagamento aprovado ✅");
-      clearInterval(statusInterval);
-    } else {
-      setStatus("pending", "Aguardando pagamento...");
-    }
-  } catch (err) {
-    console.error("Erro ao checar status:", err);
-  }
-}
+      if (!currentPaymentId) return;
 
+      try {
+        const res = await fetch(`/status-pix/${currentPaymentId}`);
+        const data = await res.json();
+
+        if (data.status === "approved") {
+          setStatus("approved", "Pagamento aprovado ✅");
+          clearInterval(statusInterval);
+        } else {
+          setStatus("pending", "Aguardando pagamento...");
+        }
+      } catch (err) {
+        console.error("Erro ao checar status:", err);
+      }
+    }
 
     function setStatus(className, text) {
       const statusEl = document.getElementById("status");
@@ -91,4 +92,3 @@
   </script>
 </body>
 </html>
-
