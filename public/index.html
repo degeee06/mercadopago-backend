@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>PIX Mercado Pago Sandbox</title>
+  <title>PIX Mercado Pago Produção</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 400px; margin: 40px auto; text-align: center; }
     input, button { padding: 10px; margin: 10px; width: 90%; }
@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <h1>Gerar PIX Sandbox</h1>
+  <h1>Gerar PIX Produção</h1>
 
   <input type="number" id="amount" placeholder="Valor (R$)" step="0.01" />
   <button onclick="gerarPix()">Gerar QR</button>
@@ -23,7 +23,8 @@
   <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
-    const sandboxEmail = "UsuárioTESTUSER8572145168866911034@testuser.com";
+    // Troque pelo email real do cliente
+    const customerEmail = "amorimmm60@gmail.com"; 
     let currentPaymentId = null;
     let statusInterval = null;
 
@@ -37,8 +38,8 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
             amount, 
-            description: "Teste VIP", 
-            email: sandboxEmail 
+            description: "Pagamento VIP", 
+            email: customerEmail 
           })
         });
 
@@ -51,16 +52,16 @@
 
         currentPaymentId = data.id;
 
-        // Exibe o QR code
+        // Exibe QR Code
         document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" />`;
 
-        // Mostra o código PIX copia-e-cola
+        // Mostra código PIX copia-e-cola
         document.getElementById("pixCode").innerText = data.qr_code;
 
-        // Mostra botão de copiar
+        // Botão copiar visível
         document.getElementById("copiar").style.display = "inline-block";
 
-        // Inicia polling para atualizar status
+        // Polling para status
         if (statusInterval) clearInterval(statusInterval);
         document.getElementById("status").innerText = "Aguardando pagamento...";
         statusInterval = setInterval(checkStatus, 3000);
