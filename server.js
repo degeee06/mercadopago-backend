@@ -8,29 +8,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Inicializa Mercado Pago (SDK atual)
-const { MercadoPagoConfig, Payment } = mercadopago;
-const mp = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN
-});
-const payment = new Payment(mp);
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve a pasta public da raiz do projeto
+// Serve frontend
 app.use(express.static(path.join(__dirname, "public")));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/index.html"));
+});
 
-// Endpoint PIX
+// Inicializa Mercado Pago (Sandbox ou Produção)
+const { MercadoPagoConfig, Payment } = mercadopago;
+const mp = new MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN // TEST-xxx para Sandbox
+});
+const payment = new Payment(mp);
+
+// Endpoint para criar PIX
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
+
   try {
     const result = await payment.create({
       body: {
         transaction_amount: Number(amount),
-        description: description || "Pagamento PIX",
+        description: description || "Pagamento VIP",
         payment_method_id: "pix",
-        payer: { email: email || "teste@cliente.com" }
+        payer: { email: email }
       }
     });
 
@@ -45,11 +49,32 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Serve o index.html
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public/index.html"));
+// Webhook do Mercado Pago
+app.post("/webhook", async (req, res) => {
+  const topic = req.query.topic; // payment ou merchant_order
+  const id = req.query.id;       // ID do pagamento ou pedido
+
+  console.log("=== Webhook recebido ===");
+  console.log("Topic:", topic);
+  console.log("ID:", id);
+  console.log("Body:", req.body);
+
+  // Opcional: consultar detalhes do pagamento
+  try {
+    if (topic === "payment") {
+      const paymentDetails = await mp.payment.findById(id);
+      console.log("Detalhes do pagamento:", paymentDetails);
+      // Aqui você pode atualizar o banco de dados ou liberar VIP
+    }
+  } catch (err) {
+    console.error("Erro ao buscar detalhes do pagamento:", err.message);
+  }
+
+  res.sendStatus(200); // Retorna 200 para o Mercado Pago
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Servidor rodando!");
+// Inicia servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
 });
