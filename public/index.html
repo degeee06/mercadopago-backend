@@ -8,6 +8,7 @@
     input, button { padding: 10px; margin: 10px; width: 90%; }
     #qr img { margin-top: 20px; max-width: 300px; }
     #pixCode { margin-top: 10px; word-wrap: break-word; font-size: 14px; color: #333; }
+    #status { margin-top: 15px; font-weight: bold; color: green; }
   </style>
 </head>
 <body>
@@ -18,10 +19,13 @@
 
   <div id="qr"></div>
   <p id="pixCode"></p>
+  <p id="status"></p>
   <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
     const sandboxEmail = "UsuárioTESTUSER8572145168866911034@testuser.com";
+    let currentPaymentId = null;
+    let statusInterval = null;
 
     async function gerarPix() {
       const amount = document.getElementById("amount").value;
@@ -45,6 +49,8 @@
           return;
         }
 
+        currentPaymentId = data.id;
+
         // Exibe o QR code
         document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" />`;
 
@@ -53,14 +59,36 @@
 
         // Mostra botão de copiar
         document.getElementById("copiar").style.display = "inline-block";
-        window.qrString = data.qr_code;
+
+        // Inicia polling para atualizar status
+        if (statusInterval) clearInterval(statusInterval);
+        document.getElementById("status").innerText = "Aguardando pagamento...";
+        statusInterval = setInterval(checkStatus, 3000);
+
       } catch (err) {
         alert("Erro ao gerar PIX: " + err.message);
       }
     }
 
+    async function checkStatus() {
+      if (!currentPaymentId) return;
+
+      const res = await fetch(`/status-pix/${currentPaymentId}`);
+      const data = await res.json();
+
+      if (data.status === "approved") {
+        document.getElementById("status").innerText = "Pagamento aprovado ✅";
+        clearInterval(statusInterval);
+      } else if (data.status === "rejected") {
+        document.getElementById("status").innerText = "Pagamento recusado ❌";
+        clearInterval(statusInterval);
+      } else {
+        document.getElementById("status").innerText = "Aguardando pagamento...";
+      }
+    }
+
     function copiarPix() {
-      navigator.clipboard.writeText(window.qrString)
+      navigator.clipboard.writeText(document.getElementById("pixCode").innerText)
         .then(() => alert("Código PIX copiado!"))
         .catch(() => alert("Falha ao copiar."));
     }
