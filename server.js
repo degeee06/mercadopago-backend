@@ -19,7 +19,7 @@ const payment = new mercadopago.Payment(mp);
 // Frontend
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "../public")));
 
 // Endpoint PIX
 app.post("/create-pix", async (req, res) => {
@@ -47,7 +47,7 @@ app.post("/create-pix", async (req, res) => {
 
 // Serve frontend
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public/index.html"));
+  res.sendFile(path.join(__dirname, "../public/index.html"));
 });
 
 app.listen(process.env.PORT || 3000, () => {
