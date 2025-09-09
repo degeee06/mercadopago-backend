@@ -56,7 +56,7 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Checa status do pagamento
+// Checa status do pagamento (via Supabase)
 app.get("/status-pix/:id", async (req, res) => {
   const id = req.params.id;
   const { data, error } = await supabase.from("pagamentos").select("status").eq("id", id).single();
@@ -65,11 +65,12 @@ app.get("/status-pix/:id", async (req, res) => {
 });
 
 // Webhook Mercado Pago
-app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
+app.post("/webhook", express.json(), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
+  // Validação da assinatura
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -87,17 +88,16 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   console.log("Webhook validado ✅");
 
   try {
-    const paymentId = req.body?.data?.id || req.query.id;
+    const paymentId = req.body?.data?.id;
     if (!paymentId) return res.sendStatus(400);
 
-    const paymentDetails = await payment.get(paymentId);
+    const paymentDetails = await payment.get({ id: paymentId });
 
-    // Atualiza status no Supabase
     await supabase.from("pagamentos")
-      .update({ status: paymentDetails.body.status })
+      .update({ status: paymentDetails.status })
       .eq("id", paymentId);
 
-    console.log("Status atualizado:", paymentDetails.body.status);
+    console.log("Status atualizado:", paymentDetails.status);
   } catch (err) {
     console.error("Erro ao atualizar pagamento:", err.message);
   }
