@@ -2,6 +2,7 @@
 import express from "express";
 import fetch from "node-fetch";
 import bodyParser from "body-parser";
+app.use(express.static(".")); // Serve index.html e outros arquivos estáticos
 
 const app = express();
 app.use(bodyParser.json());
