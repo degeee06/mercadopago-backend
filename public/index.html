@@ -9,6 +9,9 @@
     #qr img { margin-top: 20px; max-width: 300px; }
     #pixCode { margin-top: 10px; word-wrap: break-word; font-size: 14px; color: #333; }
     #status { margin-top: 15px; font-weight: bold; color: green; }
+    #status.pending { color: orange; }
+    #status.approved { color: green; }
+    #status.rejected { color: red; }
   </style>
 </head>
 <body>
@@ -23,8 +26,7 @@
   <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
-    // Troque pelo email real do cliente
-    const customerEmail = "amorimmm60@gmail.com"; 
+    const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
     let currentPaymentId = null;
     let statusInterval = null;
 
@@ -52,18 +54,14 @@
 
         currentPaymentId = data.id;
 
-        // Exibe QR Code
         document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" />`;
-
-        // Mostra código PIX copia-e-cola
         document.getElementById("pixCode").innerText = data.qr_code;
-
-        // Botão copiar visível
         document.getElementById("copiar").style.display = "inline-block";
 
-        // Polling para status
         if (statusInterval) clearInterval(statusInterval);
-        document.getElementById("status").innerText = "Aguardando pagamento...";
+        setStatus("pending");
+
+        // Polling para checar status
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
@@ -74,18 +72,28 @@
     async function checkStatus() {
       if (!currentPaymentId) return;
 
-      const res = await fetch(`/status-pix/${currentPaymentId}`);
-      const data = await res.json();
+      try {
+        const res = await fetch(`/status-pix/${currentPaymentId}`);
+        const data = await res.json();
 
-      if (data.status === "approved") {
-        document.getElementById("status").innerText = "Pagamento aprovado ✅";
-        clearInterval(statusInterval);
-      } else if (data.status === "rejected") {
-        document.getElementById("status").innerText = "Pagamento recusado ❌";
-        clearInterval(statusInterval);
-      } else {
-        document.getElementById("status").innerText = "Aguardando pagamento...";
+        if (data.status === "approved") {
+          setStatus("approved", "Pagamento aprovado ✅");
+          clearInterval(statusInterval);
+        } else if (data.status === "rejected") {
+          setStatus("rejected", "Pagamento recusado ❌");
+          clearInterval(statusInterval);
+        } else {
+          setStatus("pending", "Aguardando pagamento...");
+        }
+      } catch (err) {
+        console.error("Erro ao checar status:", err);
       }
+    }
+
+    function setStatus(className, text) {
+      const statusEl = document.getElementById("status");
+      statusEl.className = className || "";
+      statusEl.innerText = text || "";
     }
 
     function copiarPix() {
