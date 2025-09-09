@@ -24,6 +24,27 @@ const payment = new Payment(mpClient);
 // Inicializa Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
+// Função de polling para atualizar status do pagamento
+async function atualizarStatus(paymentId) {
+  try {
+    const paymentDetails = await payment.get(paymentId);
+    const status = paymentDetails.body.status; // approved, pending, rejected
+
+    await supabase.from("pagamentos")
+      .update({ status })
+      .eq("id", paymentId);
+
+    console.log(`Status do pagamento ${paymentId}: ${status}`);
+
+    // Se ainda estiver pending, checa de novo em 5s
+    if (status === "pending") setTimeout(() => atualizarStatus(paymentId), 5000);
+  } catch (err) {
+    console.error(`Erro ao checar status do pagamento ${paymentId}:`, err.message);
+    // Tenta novamente em 5s se falhar
+    setTimeout(() => atualizarStatus(paymentId), 5000);
+  }
+}
+
 // Cria PIX
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
@@ -39,10 +60,13 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
-    // Salva no Supabase
+    // Salva como pending no Supabase
     await supabase.from("pagamentos").insert([
       { id: result.id, email, amount: Number(amount), status: "pending" }
     ]);
+
+    // Inicia polling para atualizar status
+    atualizarStatus(result.id);
 
     res.json({
       id: result.id,
@@ -70,7 +94,6 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
-  // Validação HMAC (igual antes)
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -78,6 +101,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     if (key === "ts") ts = value;
     else if (key === "v1") v1 = value;
   }
+
   const dataId = (req.query["data.id"] || "").toLowerCase();
   const xRequestId = req.headers["x-request-id"] || "";
   const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
@@ -90,20 +114,15 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     const paymentId = req.body?.data?.id || req.query.id;
     if (!paymentId) return res.sendStatus(400);
 
-    // Atualiza no Supabase diretamente, sem chamar Payment.get()
-    await supabase.from("pagamentos")
-      .update({ status: "approved" })
-      .eq("id", paymentId);
-
-    console.log("Status atualizado pelo Webhook:", "approved");
+    // Inicia polling para atualizar status do pagamento real
+    atualizarStatus(paymentId);
 
   } catch (err) {
-    console.error("Erro ao atualizar pagamento:", err.message);
+    console.error("Erro no Webhook:", err.message);
   }
 
   res.sendStatus(200);
 });
-
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
