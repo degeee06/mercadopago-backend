@@ -61,25 +61,21 @@
     }
 
     async function checkStatus() {
-      if (!currentPaymentId) return;
-
-      try {
-        const res = await fetch(`/status-pix/${currentPaymentId}`);
-        const data = await res.json();
-
-        if (data.status === "approved" || data.status === "paid") {
-          setStatus("approved", "Pagamento aprovado ✅");
-          clearInterval(statusInterval);
-        } else if (data.status === "rejected") {
-          setStatus("rejected", "Pagamento recusado ❌");
-          clearInterval(statusInterval);
-        } else {
-          setStatus("pending", "Aguardando pagamento...");
-        }
-      } catch (err) {
-        console.error("Erro ao checar status:", err);
-      }
+  if (!currentPaymentId) return;
+  try {
+    const res = await fetch(`/status-pix/${currentPaymentId}`);
+    const data = await res.json();
+    if (data.status === "approved") {
+      setStatus("approved", "Pagamento aprovado ✅");
+      clearInterval(statusInterval);
+    } else {
+      setStatus("pending", "Aguardando pagamento...");
     }
+  } catch (err) {
+    console.error("Erro ao checar status:", err);
+  }
+}
+
 
     function setStatus(className, text) {
       const statusEl = document.getElementById("status");
@@ -95,3 +91,4 @@
   </script>
 </body>
 </html>
+
