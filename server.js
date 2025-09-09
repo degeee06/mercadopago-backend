@@ -89,12 +89,13 @@ app.get("/status-pix/:id", async (req, res) => {
 });
 
 // Webhook Mercado Pago
+// Webhook final
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
-  // Validação HMAC igual antes...
+  // Validação HMAC...
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -112,7 +113,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     const paymentId = req.body?.data?.id || req.query.id;
     if (!paymentId) return res.sendStatus(400);
 
-    // Atualiza diretamente no Supabase como approved (ou rejected se quiser tratar)
+    // Apenas atualiza quando o Webhook chega
     await supabase.from("pagamentos")
       .update({ status: "approved" })
       .eq("id", paymentId);
@@ -125,6 +126,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   res.sendStatus(200);
 });
+
 
 
 // Inicia servidor
