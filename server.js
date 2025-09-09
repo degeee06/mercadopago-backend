@@ -24,27 +24,6 @@ const payment = new Payment(mpClient);
 // Inicializa Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-// Função de polling para atualizar status do pagamento
-async function atualizarStatus(paymentId) {
-  try {
-    const paymentDetails = await payment.get(paymentId);
-    const status = paymentDetails.body.status; // approved, pending, rejected
-
-    await supabase.from("pagamentos")
-      .update({ status })
-      .eq("id", paymentId);
-
-    console.log(`Status do pagamento ${paymentId}: ${status}`);
-
-    // Se ainda estiver pending, checa de novo em 5s
-    if (status === "pending") setTimeout(() => atualizarStatus(paymentId), 5000);
-  } catch (err) {
-    console.error(`Erro ao checar status do pagamento ${paymentId}:`, err.message);
-    // Tenta novamente em 5s se falhar
-    setTimeout(() => atualizarStatus(paymentId), 5000);
-  }
-}
-
 // Cria PIX
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
@@ -60,20 +39,17 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
-    // Salva como pending no Supabase
+    // Salva no Supabase como pending
     await supabase.from("pagamentos").insert([
       { id: result.id, email, amount: Number(amount), status: "pending" }
     ]);
 
-    // Inicia polling para atualizar status
-    atualizarStatus(result.id);
-
     res.json({
       id: result.id,
-      status: result.status,
       qr_code: result.point_of_interaction.transaction_data.qr_code,
       qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -89,13 +65,11 @@ app.get("/status-pix/:id", async (req, res) => {
 });
 
 // Webhook Mercado Pago
-// Webhook final
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
-  // Validação HMAC...
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -103,6 +77,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     if (key === "ts") ts = value;
     else if (key === "v1") v1 = value;
   }
+
   const dataId = (req.query["data.id"] || "").toLowerCase();
   const xRequestId = req.headers["x-request-id"] || "";
   const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
@@ -113,7 +88,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     const paymentId = req.body?.data?.id || req.query.id;
     if (!paymentId) return res.sendStatus(400);
 
-    // Apenas atualiza quando o Webhook chega
+    // Atualiza apenas via Webhook
     await supabase.from("pagamentos")
       .update({ status: "approved" })
       .eq("id", paymentId);
@@ -126,8 +101,6 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   res.sendStatus(200);
 });
-
-
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
