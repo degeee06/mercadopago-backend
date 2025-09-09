@@ -8,33 +8,31 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ⚠️ Inicializa Mercado Pago (SDK 2025)
-const mp = new mercadopago.MercadoPagoConfig({
+// Inicializa Mercado Pago (SDK atual)
+const { MercadoPagoConfig, Payment } = mercadopago;
+const mp = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN
 });
+const payment = new Payment(mp);
 
-// Criador de pagamentos
-const payment = new mercadopago.Payment(mp);
-
-// Corrige caminhos (Render coloca projeto em /src)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 👉 Usa a pasta public que está NA RAIZ do repo
-app.use(express.static(path.join(__dirname, "../public")));
+// Serve a pasta public da raiz do projeto
+app.use(express.static(path.join(__dirname, "public")));
 
-// Endpoint para criar PIX
+// Endpoint PIX
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
   try {
-    const paymentData = {
-      transaction_amount: Number(amount),
-      description: description || "Pagamento PIX",
-      payment_method_id: "pix",
-      payer: { email: email || "teste@cliente.com" }
-    };
-
-    const result = await payment.create({ body: paymentData });
+    const result = await payment.create({
+      body: {
+        transaction_amount: Number(amount),
+        description: description || "Pagamento PIX",
+        payment_method_id: "pix",
+        payer: { email: email || "teste@cliente.com" }
+      }
+    });
 
     res.json({
       id: result.id,
@@ -47,9 +45,9 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Rota para servir o index.html
+// Serve o index.html
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../public/index.html"));
+  res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
 app.listen(process.env.PORT || 3000, () => {
