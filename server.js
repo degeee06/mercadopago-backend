@@ -39,15 +39,17 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
+    const qrData = result.body?.point_of_interaction?.transaction_data;
+
     // Salva no Supabase como pending
     await supabase.from("pagamentos").insert([
-      { id: result.id, email, amount: Number(amount), status: "pending" }
+      { id: result.body.id, email, amount: Number(amount), status: "pending" }
     ]);
 
     res.json({
-      id: result.id,
-      qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
+      id: result.body.id,
+      qr_code: qrData?.qr_code || "",
+      qr_code_base64: qrData?.qr_code_base64 || "",
     });
 
   } catch (err) {
@@ -55,6 +57,8 @@ app.post("/create-pix", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
 
 // Checa status do pagamento
 app.get("/status-pix/:id", async (req, res) => {
