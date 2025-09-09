@@ -84,7 +84,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const computedHash = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
   if (computedHash !== v1) return res.sendStatus(401);
 
-  try {
+ try {
   const paymentId = req.body?.data?.id || req.query.id;
   if (!paymentId) return res.sendStatus(400);
 
@@ -112,6 +112,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 }
 
 res.sendStatus(200);
+
 
 
 // Inicia servidor
