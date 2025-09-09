@@ -17,10 +17,10 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
-// Inicializa Mercado Pago (Sandbox ou Produção)
+// Inicializa Mercado Pago com token de Produção
 const { MercadoPagoConfig, Payment } = mercadopago;
 const mp = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN // TEST-xxx para Sandbox
+  accessToken: process.env.MP_ACCESS_TOKEN // token PROD-xxx
 });
 const payment = new Payment(mp);
 
@@ -37,7 +37,7 @@ app.post("/create-pix", async (req, res) => {
         transaction_amount: Number(amount),
         description: description || "Pagamento VIP",
         payment_method_id: "pix",
-        payer: { email: email }
+        payer: { email: email } // email real do cliente
       }
     });
 
@@ -54,7 +54,7 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Endpoint para checar status de um pagamento (frontend faz polling)
+// Endpoint para checar status do pagamento (frontend faz polling)
 app.get("/status-pix/:id", (req, res) => {
   const id = req.params.id;
   const status = pagamentos[id] || "pending";
@@ -66,9 +66,9 @@ app.post("/webhook", async (req, res) => {
   const topic = req.query.topic;
   const id = req.query.id;
 
-  // Validação da assinatura
+  // Validação da assinatura do webhook
   const signature = req.headers["x-meli-signature"] || req.headers["x-signature"];
-  const secret = process.env.MP_WEBHOOK_SECRET;
+  const secret = process.env.MP_WEBHOOK_SECRET; // chave secreta PROD
 
   if (!signature || signature !== secret) {
     console.log("Webhook inválido! Assinatura não conferiu.");
@@ -83,7 +83,7 @@ app.post("/webhook", async (req, res) => {
       const paymentDetails = await mp.payment.findById(id);
       console.log("Detalhes do pagamento:", paymentDetails);
 
-      pagamentos[id] = paymentDetails.status; // Atualiza status
+      pagamentos[id] = paymentDetails.status; // atualiza status
 
       // Aqui você pode liberar VIP ou atualizar banco
     }
