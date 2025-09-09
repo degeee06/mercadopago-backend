@@ -5,7 +5,7 @@
   <title>PIX Mercado Pago</title>
 </head>
 <body>
-  <h1>Gerar PIX Sandbox</h1>
+  <h1>Gerar PIX</h1>
   <input type="number" id="amount" placeholder="Valor (R$)" />
   <button onclick="gerarPix()">Gerar QR</button>
 
