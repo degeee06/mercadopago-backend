@@ -1,9 +1,9 @@
 import express from "express";
 import cors from "cors";
+import mercadopago from "mercadopago";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
-import { MercadoPagoConfig, Payment } from "mercadopago";
 
 const app = express();
 app.use(cors());
@@ -18,12 +18,8 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public/index.html"));
 });
 
-// Inicializa Mercado Pago (Produção) com SDK 2.x
-const mpClient = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN, // PROD-xxx
-});
-
-const payment = new Payment(mpClient);
+// Inicializa Mercado Pago (Produção)
+mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
 
 // Armazena status de pagamentos temporariamente
 const pagamentos = {};
@@ -33,23 +29,20 @@ app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
 
   try {
-    const result = await payment.create({
-      body: {
-        transaction_amount: Number(amount),
-        description: description || "Pagamento VIP",
-        payment_method_id: "pix",
-        payer: { email },
-      },
+    const payment = await mercadopago.payment.create({
+      transaction_amount: Number(amount),
+      description: description || "Pagamento VIP",
+      payment_method_id: "pix",
+      payer: { email }
     });
 
-    pagamentos[result.id] = "pending";
+    pagamentos[payment.body.id] = "pending";
 
     res.json({
-      id: result.id,
-      status: result.status,
-      qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64:
-        result.point_of_interaction.transaction_data.qr_code_base64,
+      id: payment.body.id,
+      status: payment.body.status,
+      qr_code: payment.body.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: payment.body.point_of_interaction.transaction_data.qr_code_base64
     });
   } catch (err) {
     console.error(err);
@@ -76,8 +69,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   // Parse do x-signature
   const parts = signatureHeader.split(",");
-  let ts = "",
-    v1 = "";
+  let ts = "", v1 = "";
   for (const p of parts) {
     const [key, value] = p.split("=");
     if (key === "ts") ts = value;
@@ -87,7 +79,6 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   // Extrai data.id do query param
   const dataId = (req.query["data.id"] || "").toLowerCase();
   const xRequestId = req.headers["x-request-id"] || "";
-
   const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
 
   const computedHash = crypto
@@ -103,12 +94,13 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   console.log("=== Webhook validado ✅ ===");
 
   try {
-    const paymentId = req.query.id;
-    if (paymentId) {
-      const paymentDetails = await payment.get(paymentId);
+    if (dataId) {
+      // Consulta pagamento usando o SDK
+      const paymentDetails = await mercadopago.payment.get(dataId);
       console.log("Detalhes do pagamento:", paymentDetails.body);
 
-      pagamentos[paymentId] = paymentDetails.body.status;
+      // Atualiza o status do pagamento para o polling frontend
+      pagamentos[dataId] = paymentDetails.body.status;
 
       // Aqui você pode liberar VIP ou atualizar banco
       // Ex: liberarVIP(paymentDetails.body.payer.email)
