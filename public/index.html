@@ -25,10 +25,15 @@
   <p id="status"></p>
   <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
-  <script>
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    const SUPABASE_URL = "<SUA_SUPABASE_URL>";
+    const SUPABASE_KEY = "<SUA_SUPABASE_SERVICE_KEY>";
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
     const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
     let currentPaymentId = null;
-    let statusInterval = null;
 
     async function gerarPix() {
       const amount = document.getElementById("amount").value;
@@ -49,31 +54,22 @@
         document.getElementById("pixCode").innerText = data.qr_code;
         document.getElementById("copiar").style.display = "inline-block";
 
-        if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
-        // Polling para checar status do Supabase
-        statusInterval = setInterval(checkStatus, 3000);
+        // Inscreve no Supabase Realtime para receber atualização de status
+        supabase
+          .channel('pagamento-updates')
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pagamentos', filter: `id=eq.${currentPaymentId}` }, payload => {
+            if (payload.new.status === "approved") {
+              setStatus("approved", "Pagamento aprovado ✅");
+            } else {
+              setStatus("pending", "Aguardando pagamento...");
+            }
+          })
+          .subscribe();
 
       } catch (err) {
         alert("Erro ao gerar PIX: " + err.message);
-      }
-    }
-
-    async function checkStatus() {
-      if (!currentPaymentId) return;
-      try {
-        const res = await fetch(`/status-pix/${currentPaymentId}`);
-        const data = await res.json();
-
-        if (data.status === "approved") {
-          setStatus("approved", "Pagamento aprovado ✅");
-          clearInterval(statusInterval);
-        } else {
-          setStatus("pending", "Aguardando pagamento...");
-        }
-      } catch (err) {
-        console.error("Erro ao checar status:", err);
       }
     }
 
