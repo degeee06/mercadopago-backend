@@ -58,8 +58,6 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-
-
 // Checa status do pagamento
 app.get("/status-pix/:id", async (req, res) => {
   const id = req.params.id;
@@ -90,19 +88,21 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   if (computedHash !== v1) return res.sendStatus(401);
 
   try {
-    const paymentId = req.body?.data?.id || req.query.id;
+    const paymentId = req.body?.data?.id;
     const action = req.body?.action;
+    const status = req.body?.data?.status;
+
     if (!paymentId) return res.sendStatus(400);
 
-    // Atualiza Supabase somente se for payment.updated (PIX pago)
-    if (action === "payment.updated") {
+    // Atualiza Supabase somente se pagamento aprovado
+    if ((action === "payment.updated") && (status === "approved" || status === "paid")) {
       await supabase.from("pagamentos")
         .update({ status: "approved" })
         .eq("id", paymentId);
 
       console.log("Status atualizado pelo Webhook:", paymentId, "approved");
     } else {
-      console.log("Evento recebido, mas não é pagamento aprovado:", paymentId, action);
+      console.log("Pagamento pendente ou evento diferente:", paymentId, action, status);
     }
 
   } catch (err) {
