@@ -8,7 +8,7 @@
     input, button { padding: 10px; margin: 10px; width: 90%; }
     #qr img { margin-top: 20px; max-width: 300px; }
     #pixCode { margin-top: 10px; word-wrap: break-word; font-size: 14px; color: #333; }
-    #status { margin-top: 15px; font-weight: bold; }
+    #status { margin-top: 15px; font-weight: bold; color: green; }
     #status.pending { color: orange; }
     #status.approved { color: green; }
     #status.rejected { color: red; }
@@ -38,22 +38,13 @@
         const res = await fetch("/create-pix", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            amount, 
-            description: "Pagamento VIP", 
-            email: customerEmail 
-          })
+          body: JSON.stringify({ amount, description: "Pagamento VIP", email: customerEmail })
         });
 
         const data = await res.json();
-
-        if (data.error) {
-          alert("Erro: " + data.error);
-          return;
-        }
+        if (data.error) return alert("Erro: " + data.error);
 
         currentPaymentId = data.id;
-
         document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" />`;
         document.getElementById("pixCode").innerText = data.qr_code;
         document.getElementById("copiar").style.display = "inline-block";
@@ -61,6 +52,7 @@
         if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
+        // Polling para checar status no Supabase via backend
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
@@ -75,7 +67,7 @@
         const res = await fetch(`/status-pix/${currentPaymentId}`);
         const data = await res.json();
 
-        if (data.status === "approved") {
+        if (data.status === "approved" || data.status === "paid") {
           setStatus("approved", "Pagamento aprovado ✅");
           clearInterval(statusInterval);
         } else if (data.status === "rejected") {
