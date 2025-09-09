@@ -7,7 +7,7 @@ import crypto from "crypto";
 
 const app = express();
 app.use(cors());
-app.use(express.json()); // Para outros endpoints
+app.use(express.json()); // Para endpoints normais
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,11 +19,9 @@ app.get("/", (req, res) => {
 });
 
 // Inicializa Mercado Pago (Produção)
-const { MercadoPagoConfig, Payment } = mercadopago;
-const mp = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN // PROD-xxx
+mercadopago.configure({
+  access_token: process.env.MP_ACCESS_TOKEN // PROD-xxx
 });
-const payment = new Payment(mp);
 
 // Armazena status de pagamentos temporariamente
 const pagamentos = {};
@@ -33,24 +31,23 @@ app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
 
   try {
-    const result = await payment.create({
-      body: {
-        transaction_amount: Number(amount),
-        description: description || "Pagamento VIP",
-        payment_method_id: "pix",
-        payer: { email }
-      }
+    const payment = await mercadopago.payment.create({
+      transaction_amount: Number(amount),
+      description: description || "Pagamento VIP",
+      payment_method_id: "pix",
+      payer: { email }
     });
 
-    pagamentos[result.id] = "pending";
+    pagamentos[payment.body.id] = "pending";
 
     res.json({
-      id: result.id,
-      status: result.status,
-      qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64
+      id: payment.body.id,
+      status: payment.body.status,
+      qr_code: payment.body.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: payment.body.point_of_interaction.transaction_data.qr_code_base64
     });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -62,57 +59,60 @@ app.get("/status-pix/:id", (req, res) => {
   res.json({ status });
 });
 
-// Webhook de produção com validação HMAC SHA256
+// Webhook Mercado Pago (produção) com HMAC
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
-  const xSignature = req.headers["x-signature"];
-  const xRequestId = req.headers["x-request-id"];
-  const queryParams = req.query;
+  const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
 
-  if (!xSignature || !xRequestId || !secret) {
+  if (!signatureHeader || !secret) {
     console.log("Webhook inválido! Sem assinatura ou segredo.");
     return res.sendStatus(401);
   }
 
-  // Extrai ts e v1
-  const parts = xSignature.split(",");
+  // Parse do x-signature
+  const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
-  for (const part of parts) {
-    const [key, value] = part.split("=");
+  for (const p of parts) {
+    const [key, value] = p.split("=");
     if (key === "ts") ts = value;
-    if (key === "v1") v1 = value;
+    else if (key === "v1") v1 = value;
   }
 
-  // data.id vem da query param, precisa ser minúsculo
-  const dataId = (queryParams["data.id"] || "").toLowerCase();
+  // Extrai data.id do query param
+  const dataId = (req.query["data.id"] || "").toLowerCase();
+  const xRequestId = req.headers["x-request-id"] || "";
 
-  // Monta manifest
   const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
 
-  // Calcula HMAC SHA256 hexadecimal
-  const hmac = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
+  const computedHash = crypto
+    .createHmac("sha256", secret)
+    .update(manifest)
+    .digest("hex");
 
-  if (hmac !== v1) {
+  if (computedHash !== v1) {
     console.log("Webhook inválido! Assinatura não conferiu.");
     return res.sendStatus(401);
   }
 
   console.log("=== Webhook validado ✅ ===");
-  console.log("Topic:", queryParams.topic || "payment", "ID:", dataId);
 
   try {
-    // Busca detalhes do pagamento para atualizar status
-    const paymentDetails = await mp.payment.findById(dataId);
-    pagamentos[dataId] = paymentDetails.status;
+    // Consulta pagamento usando o SDK
+    const paymentId = req.query.id;
+    if (paymentId) {
+      const paymentDetails = await mercadopago.payment.get(paymentId);
+      console.log("Detalhes do pagamento:", paymentDetails.body);
 
-    console.log("Status atualizado:", paymentDetails.status);
-    // Aqui você pode liberar VIP ou atualizar banco
-    // Ex: liberarVIP(paymentDetails.payer.email)
+      pagamentos[paymentId] = paymentDetails.body.status;
+
+      // Aqui você pode liberar VIP ou atualizar banco
+      // Ex: liberarVIP(paymentDetails.body.payer.email)
+    }
   } catch (err) {
     console.error("Erro ao buscar detalhes do pagamento:", err.message);
   }
 
-  res.sendStatus(200); // retorna 200 para o Mercado Pago
+  res.sendStatus(200);
 });
 
 // Inicia servidor
