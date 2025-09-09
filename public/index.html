@@ -52,6 +52,7 @@
         if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
+        // Polling do Supabase para status real
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
