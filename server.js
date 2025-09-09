@@ -24,6 +24,9 @@ const mp = new MercadoPagoConfig({
 });
 const payment = new Payment(mp);
 
+// Armazena status de pagamentos em memória (temporário)
+const pagamentos = {};
+
 // Endpoint para criar PIX
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
@@ -38,6 +41,8 @@ app.post("/create-pix", async (req, res) => {
       }
     });
 
+    pagamentos[result.id] = "pending"; // status inicial
+
     res.json({
       id: result.id,
       status: result.status,
@@ -49,10 +54,17 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
+// Endpoint para checar status de um pagamento (frontend faz polling)
+app.get("/status-pix/:id", (req, res) => {
+  const id = req.params.id;
+  const status = pagamentos[id] || "pending";
+  res.json({ status });
+});
+
 // Webhook do Mercado Pago com validação de assinatura
 app.post("/webhook", async (req, res) => {
-  const topic = req.query.topic; // payment ou merchant_order
-  const id = req.query.id;       // ID do pagamento ou pedido
+  const topic = req.query.topic;
+  const id = req.query.id;
 
   // Validação da assinatura
   const signature = req.headers["x-meli-signature"] || req.headers["x-signature"];
@@ -60,28 +72,27 @@ app.post("/webhook", async (req, res) => {
 
   if (!signature || signature !== secret) {
     console.log("Webhook inválido! Assinatura não conferiu.");
-    return res.sendStatus(401); // não autorizado
+    return res.sendStatus(401);
   }
 
   console.log("=== Webhook validado ===");
-  console.log("Topic:", topic);
-  console.log("ID:", id);
-  console.log("Body:", req.body);
+  console.log("Topic:", topic, "ID:", id);
 
-  // Opcional: consultar detalhes do pagamento
   try {
     if (topic === "payment") {
       const paymentDetails = await mp.payment.findById(id);
       console.log("Detalhes do pagamento:", paymentDetails);
-      // Aqui você pode atualizar o banco de dados ou liberar VIP
+
+      pagamentos[id] = paymentDetails.status; // Atualiza status
+
+      // Aqui você pode liberar VIP ou atualizar banco
     }
   } catch (err) {
     console.error("Erro ao buscar detalhes do pagamento:", err.message);
   }
 
-  res.sendStatus(200); // Retorna 200 para o Mercado Pago
+  res.sendStatus(200);
 });
-
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
