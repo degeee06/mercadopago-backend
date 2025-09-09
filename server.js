@@ -39,19 +39,17 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
-    const qrData = result.body?.point_of_interaction?.transaction_data;
-
-    // Salva no Supabase como pending
+    // Salva no Supabase
     await supabase.from("pagamentos").insert([
-      { id: result.body.id, email, amount: Number(amount), status: "pending" }
+      { id: result.id, email, amount: Number(amount), status: "pending" }
     ]);
 
     res.json({
-      id: result.body.id,
-      qr_code: qrData?.qr_code || "",
-      qr_code_base64: qrData?.qr_code_base64 || "",
+      id: result.id,
+      status: result.status,
+      qr_code: result.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -72,7 +70,6 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const secret = process.env.MP_WEBHOOK_SECRET;
   if (!signatureHeader || !secret) return res.sendStatus(401);
 
-  // Validação HMAC
   const parts = signatureHeader.split(",");
   let ts = "", v1 = "";
   for (const p of parts) {
@@ -87,32 +84,22 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const computedHash = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
   if (computedHash !== v1) return res.sendStatus(401);
 
+  console.log("Webhook validado ✅");
+
   try {
-    const action = req.body?.action;
-    const paymentData = req.body?.data;
+    const paymentId = req.body?.data?.id || req.query.id;
+    if (!paymentId) return res.sendStatus(400);
 
-    // Se não tiver paymentData ou id, ignora o evento
-    if (!paymentData || !paymentData.id) {
-      console.log("Evento recebido sem id válido:", action);
-      return res.sendStatus(200);
-    }
+    const paymentDetails = await payment.get(paymentId);
 
-    const paymentId = paymentData.id;
-    const status = paymentData.status;
+    // Atualiza status no Supabase
+    await supabase.from("pagamentos")
+      .update({ status: paymentDetails.body.status })
+      .eq("id", paymentId);
 
-    // Atualiza apenas se for payment.updated (PIX pago)
-    if (action === "payment.updated" && (status === "approved" || status === "paid")) {
-      await supabase.from("pagamentos")
-        .update({ status: "approved" })
-        .eq("id", paymentId);
-
-      console.log("Status atualizado pelo Webhook:", paymentId, "approved");
-    } else {
-      console.log("Pagamento pendente ou evento diferente:", paymentId, action, status);
-    }
-
+    console.log("Status atualizado:", paymentDetails.body.status);
   } catch (err) {
-    console.error("Erro ao processar Webhook:", err.message);
+    console.error("Erro ao atualizar pagamento:", err.message);
   }
 
   res.sendStatus(200);
