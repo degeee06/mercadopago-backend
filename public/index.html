@@ -26,7 +26,7 @@
   <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
-    const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
+    const customerEmail = "amorimmm60@gmail.com";
     let currentPaymentId = null;
     let statusInterval = null;
 
@@ -52,7 +52,6 @@
         if (statusInterval) clearInterval(statusInterval);
         setStatus("pending", "Aguardando pagamento...");
 
-        // Polling para checar status no Supabase via backend
         statusInterval = setInterval(checkStatus, 3000);
 
       } catch (err) {
