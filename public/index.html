@@ -29,8 +29,12 @@
         const res = await fetch("/create-pix", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ amount, description: "Teste VIP", email: "teste@cliente.com" })
-        });
+          body: JSON.stringify({ 
+  amount, 
+  description: "Teste VIP", 
+  email: "UsuárioTESTUSER8572145168866911034@testuser.com" 
+})
+
 
         const data = await res.json();
 
@@ -61,3 +65,4 @@
   </script>
 </body>
 </html>
+
