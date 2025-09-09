@@ -1,81 +1,41 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <title>Pagamento VIP - Pix</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; }
-    input, button { padding: 8px; margin: 5px 0; width: 100%; box-sizing: border-box; }
-    #qr { margin-top: 20px; text-align: center; }
-    img { width: 250px; height: 250px; }
-    .vip-status { margin-top: 20px; font-weight: bold; }
-  </style>
-</head>
-<body>
-  <h1>Pagamento VIP - Pix</h1>
+import express from "express";
+import cors from "cors";
+import mercadopago from "mercadopago";
 
-  <label>User ID:</label>
-  <input type="text" id="userId" placeholder="Digite seu ID de usuário">
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-  <label>Valor (R$):</label>
-  <input type="number" id="valor" placeholder="Ex: 10.50" step="0.01">
+// ⚠️ Coloque seu token de produção ou sandbox aqui
+mercadopago.configurations.setAccessToken("TEST-6172816457651620-090719-ef2ac7e7628cc5b8a64d2ca1ddf89c61-469548398");
 
-  <button id="gerarPix">Gerar Pix</button>
+// Criar pagamento PIX
+app.post("/create-pix", async (req, res) => {
+  const { amount, description, email } = req.body;
 
-  <div id="qr"></div>
-
-  <button id="checarVip" style="display:none;">Checar VIP</button>
-  <div class="vip-status" id="vipStatus"></div>
-
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-  <script>
-    const gerarBtn = document.getElementById("gerarPix");
-    const checarBtn = document.getElementById("checarVip");
-    const qrDiv = document.getElementById("qr");
-    const vipStatus = document.getElementById("vipStatus");
-
-    gerarBtn.onclick = async () => {
-      const userId = document.getElementById("userId").value.trim();
-      const valor = parseFloat(document.getElementById("valor").value);
-
-      if(!userId || !valor) { alert("Preencha userId e valor"); return; }
-
-      try {
-        const res = await fetch("/criar-pix", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, valor })
-        });
-
-        const data = await res.json();
-        if(data.error) { alert(data.error); return; }
-
-        // Gerar QR code visual
-        qrDiv.innerHTML = "";
-        QRCode.toCanvas(data.pix_code, { width: 250 }, (err, canvas) => {
-          if(err) return console.error(err);
-          qrDiv.appendChild(canvas);
-        });
-
-        checarBtn.style.display = "block";
-        vipStatus.textContent = "";
-      } catch(e) {
-        alert("Erro ao gerar Pix: " + e.message);
+  try {
+    const paymentData = {
+      transaction_amount: Number(amount),
+      description: description || "Pagamento PIX",
+      payment_method_id: "pix",
+      payer: {
+        email: email || "cliente@exemplo.com"
       }
     };
 
-    checarBtn.onclick = async () => {
-      const userId = document.getElementById("userId").value.trim();
-      if(!userId) return;
+    const payment = await mercadopago.payment.create(paymentData);
 
-      try {
-        const res = await fetch(`/vip/${userId}`);
-        const data = await res.json();
-        vipStatus.textContent = data.vip ? "✅ Usuário VIP liberado!" : "⏳ Aguardando pagamento...";
-      } catch(e) {
-        vipStatus.textContent = "Erro ao checar VIP";
-      }
-    };
-  </script>
-</body>
-</html>
+    res.json({
+      id: payment.body.id,
+      status: payment.body.status,
+      qr_code: payment.body.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: payment.body.point_of_interaction.transaction_data.qr_code_base64
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Servidor rodando!");
+});
