@@ -67,6 +67,7 @@ app.get("/status-pix/:id", async (req, res) => {
 });
 
 // Webhook Mercado Pago
+// Webhook Mercado Pago
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
@@ -88,14 +89,19 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
   if (computedHash !== v1) return res.sendStatus(401);
 
   try {
-    const paymentId = req.body?.data?.id;
     const action = req.body?.action;
-    const status = req.body?.data?.status;
+    const paymentData = req.body?.data;
 
-    if (!paymentId) return res.sendStatus(400);
+    if (!paymentData || !paymentData.id) {
+      console.log("Evento recebido sem id válido:", action);
+      return res.sendStatus(200); // Ignora eventos incompletos
+    }
 
-    // Atualiza Supabase somente se pagamento aprovado
-    if ((action === "payment.updated") && (status === "approved" || status === "paid")) {
+    const paymentId = paymentData.id;
+    const status = paymentData.status;
+
+    // Só atualiza se for payment.updated e status aprovado/pago
+    if (action === "payment.updated" && (status === "approved" || status === "paid")) {
       await supabase.from("pagamentos")
         .update({ status: "approved" })
         .eq("id", paymentId);
@@ -111,6 +117,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   res.sendStatus(200);
 });
+
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
