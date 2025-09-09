@@ -49,12 +49,21 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Webhook do Mercado Pago
+// Webhook do Mercado Pago com validação de assinatura
 app.post("/webhook", async (req, res) => {
   const topic = req.query.topic; // payment ou merchant_order
   const id = req.query.id;       // ID do pagamento ou pedido
 
-  console.log("=== Webhook recebido ===");
+  // Validação da assinatura
+  const signature = req.headers["x-meli-signature"] || req.headers["x-signature"];
+  const secret = process.env.MP_WEBHOOK_SECRET;
+
+  if (!signature || signature !== secret) {
+    console.log("Webhook inválido! Assinatura não conferiu.");
+    return res.sendStatus(401); // não autorizado
+  }
+
+  console.log("=== Webhook validado ===");
   console.log("Topic:", topic);
   console.log("ID:", id);
   console.log("Body:", req.body);
@@ -72,6 +81,7 @@ app.post("/webhook", async (req, res) => {
 
   res.sendStatus(200); // Retorna 200 para o Mercado Pago
 });
+
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
