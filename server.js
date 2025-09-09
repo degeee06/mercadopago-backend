@@ -64,8 +64,9 @@ app.get("/status-pix/:id", (req, res) => {
 
 // Webhook do Mercado Pago (produção) com HMAC correto
 app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
-  const topic = req.query.topic;
-  const id = req.query.id;
+  const topic = req.query.topic; // "payment" ou "merchant_order"
+  const id = req.query.id;       // ID do pagamento ou pedido
+
   const signature = req.headers["x-meli-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
 
@@ -74,7 +75,7 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
     return res.sendStatus(401);
   }
 
-  // Calcula HMAC do body RAW
+  // Calcula HMAC-SHA256 do body RAW
   const hmac = crypto.createHmac("sha256", secret);
   const digest = hmac.update(req.body).digest("base64");
 
@@ -88,20 +89,24 @@ app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
 
   try {
     if (topic === "payment") {
+      // Consulta detalhes do pagamento usando token de produção
       const paymentDetails = await mp.payment.findById(id);
       console.log("Detalhes do pagamento:", paymentDetails);
 
+      // Atualiza status temporário ou banco
       pagamentos[id] = paymentDetails.status;
 
-      // Aqui você pode liberar VIP ou atualizar banco
-      // Ex: liberarVIP(paymentDetails.payer.email)
+      // Aqui você pode liberar VIP ou atualizar seu sistema
+      // Exemplo: liberarVIP(paymentDetails.payer.email)
     }
   } catch (err) {
     console.error("Erro ao buscar detalhes do pagamento:", err.message);
   }
 
+  // Retorna 200 para Mercado Pago
   res.sendStatus(200);
 });
+
 
 // Inicia servidor
 const PORT = process.env.PORT || 3000;
