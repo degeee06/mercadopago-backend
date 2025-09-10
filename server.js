@@ -39,16 +39,16 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
-    // Salva ou atualiza no Supabase usando email como ID
+    // Salva no Supabase usando paymentId como chave
     await supabase.from("pagamentos").upsert(
       [
-        { id: email.toLowerCase(), email, amount: Number(amount), status: "pending" }
+        { id: result.id, email, amount: Number(amount), status: "pending" }
       ],
       { onConflict: ["id"] }
     );
 
     res.json({
-      id: email.toLowerCase(), // usamos email como ID
+      id: result.id,  // <- chave usada no Flutter
       status: result.status,
       qr_code: result.point_of_interaction.transaction_data.qr_code,
       qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
@@ -61,7 +61,7 @@ app.post("/create-pix", async (req, res) => {
 
 // Checa status do pagamento (via Supabase)
 app.get("/status-pix/:id", async (req, res) => {
-  const id = req.params.id.toLowerCase();
+  const id = req.params.id;
   const { data, error } = await supabase.from("pagamentos").select("status").eq("id", id).single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ status: data?.status || "pending" });
@@ -92,21 +92,19 @@ app.post("/webhook", express.json(), async (req, res) => {
 
   try {
     const paymentId = req.body?.data?.id;
-    const payerEmail = req.body?.data?.payer?.email?.toLowerCase();
-
-    if (!paymentId || !payerEmail) {
-      console.log("Webhook sem ID ou email:", req.body);
+    if (!paymentId) {
+      console.log("Webhook sem paymentId:", req.body);
       return res.sendStatus(400);
     }
 
     const paymentDetails = await payment.get({ id: paymentId });
 
-    // Atualiza o Supabase pelo email do pagador
+    // Atualiza o Supabase usando paymentId como chave
     await supabase.from("pagamentos")
       .update({ status: paymentDetails.status })
-      .eq("id", payerEmail);
+      .eq("id", paymentId);
 
-    console.log("Status atualizado:", payerEmail, "->", paymentDetails.status);
+    console.log("Status atualizado:", paymentId, "->", paymentDetails.status);
   } catch (err) {
     console.error("Erro ao atualizar pagamento:", err.message);
   }
