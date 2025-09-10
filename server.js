@@ -24,7 +24,9 @@ const payment = new Payment(mpClient);
 // Inicializa Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
+// -------------------------
 // Cria PIX
+// -------------------------
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
   if (!amount || !email) return res.status(400).json({ error: "Faltando dados" });
@@ -41,14 +43,12 @@ app.post("/create-pix", async (req, res) => {
 
     // Salva no Supabase usando paymentId como chave
     await supabase.from("pagamentos").upsert(
-      [
-        { id: result.id, email, amount: Number(amount), status: "pending" }
-      ],
+      [{ id: result.id, email, amount: Number(amount), status: "pending" }],
       { onConflict: ["id"] }
     );
 
     res.json({
-      id: result.id,  // <- chave usada no Flutter
+      id: result.id,
       status: result.status,
       qr_code: result.point_of_interaction.transaction_data.qr_code,
       qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
@@ -59,7 +59,9 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Checa status do pagamento (via Supabase)
+// -------------------------
+// Checa status do pagamento
+// -------------------------
 app.get("/status-pix/:id", async (req, res) => {
   const id = req.params.id;
   const { data, error } = await supabase.from("pagamentos").select("status").eq("id", id).single();
@@ -67,7 +69,9 @@ app.get("/status-pix/:id", async (req, res) => {
   res.json({ status: data?.status || "pending" });
 });
 
+// -------------------------
 // Webhook Mercado Pago
+// -------------------------
 app.post("/webhook", express.json(), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
   const secret = process.env.MP_WEBHOOK_SECRET;
@@ -99,10 +103,28 @@ app.post("/webhook", express.json(), async (req, res) => {
 
     const paymentDetails = await payment.get({ id: paymentId });
 
-    // Atualiza o Supabase usando paymentId como chave
+    // Atualiza status no Supabase
     await supabase.from("pagamentos")
       .update({ status: paymentDetails.status })
       .eq("id", paymentId);
+
+    // -------------------------
+    // Atualiza VIP se aprovado
+    // -------------------------
+    if (paymentDetails.status === "approved") {
+      const email = paymentDetails.payer?.email;
+      if (email) {
+        const vipUntil = new Date();
+        vipUntil.setDate(vipUntil.getDate() + 30); // 30 dias
+
+        await supabase.from("usuarios").upsert(
+          [{ email, vip_until: vipUntil.toISOString() }],
+          { onConflict: ["email"] }
+        );
+
+        console.log(`VIP atualizado para ${email} até ${vipUntil.toISOString()}`);
+      }
+    }
 
     console.log("Status atualizado:", paymentId, "->", paymentDetails.status);
   } catch (err) {
@@ -112,6 +134,31 @@ app.post("/webhook", express.json(), async (req, res) => {
   res.sendStatus(200);
 });
 
+// -------------------------
+// Rota para checar VIP
+// -------------------------
+app.get("/check-vip/:email", async (req, res) => {
+  const email = req.params.email;
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("vip_until")
+    .eq("email", email)
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    return res.status(500).json({ error: error.message });
+  }
+
+  const now = new Date();
+  if (data?.vip_until && new Date(data.vip_until) > now) {
+    return res.json({ vip: true, expiresAt: data.vip_until });
+  }
+
+  res.json({ vip: false });
+});
+
+// -------------------------
 // Inicia servidor
+// -------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor rodando em http://localhost:${PORT}`));
