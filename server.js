@@ -62,6 +62,9 @@ app.post("/create-pix", async (req, res) => {
 // =======================
 // Webhook Mercado Pago
 // =======================
+// =======================
+// Webhook Mercado Pago seguro
+// =======================
 app.post("/webhook", async (req, res) => {
   try {
     const signature = req.headers["x-signature"];
@@ -84,25 +87,47 @@ app.post("/webhook", async (req, res) => {
 
     console.log("Webhook validado ✅");
 
-    // Atualiza Supabase
     const paymentId = req.body?.data?.id;
     if (!paymentId) return res.sendStatus(400);
 
+    // Busca status atual no Mercado Pago
     const paymentDetails = await payment.get({ id: paymentId });
-    let updateData = { status: paymentDetails.status };
 
-    // Se pago/approved → adiciona 30 dias de VIP
-    if (paymentDetails.status === "approved" || paymentDetails.status === "paid") {
+    // Busca registro atual no Supabase
+    const { data: existingData, error: fetchError } = await supabase
+      .from("pagamentos")
+      .select("status, valid_until")
+      .eq("id", paymentId)
+      .single();
+
+    if (fetchError) {
+      console.error("Erro ao buscar pagamento no Supabase:", fetchError.message);
+      return res.sendStatus(500);
+    }
+
+    // Prepara dados para atualização
+    let updateData = {};
+
+    // Atualiza status sempre
+    updateData.status = paymentDetails.status;
+
+    // Só atualiza VIP se aprovado/pago **e não houver valid_until vigente**
+    const now = new Date();
+    const hasVipActive = existingData?.valid_until && new Date(existingData.valid_until) > now;
+
+    if ((paymentDetails.status === "approved" || paymentDetails.status === "paid") && !hasVipActive) {
       const validUntil = new Date();
       validUntil.setDate(validUntil.getDate() + 30);
       updateData.valid_until = validUntil.toISOString();
     }
 
-    const { error } = await supabase.from("pagamentos")
+    // Atualiza Supabase
+    const { error: updateError } = await supabase
+      .from("pagamentos")
       .update(updateData)
       .eq("id", paymentId);
 
-    if (error) console.error("Erro ao atualizar Supabase:", error.message);
+    if (updateError) console.error("Erro ao atualizar Supabase:", updateError.message);
     else console.log(`Pagamento ${paymentId} atualizado para ${paymentDetails.status}`);
 
     res.sendStatus(200);
@@ -111,6 +136,7 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 // =======================
 // Verifica VIP pelo email
