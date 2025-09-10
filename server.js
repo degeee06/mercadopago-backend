@@ -141,28 +141,32 @@ app.post("/webhook", async (req, res) => {
 // =======================
 // Verifica VIP pelo email
 // =======================
-app.get("/check-vip/:email", async (req, res) => {
-  const email = req.params.email;
+app.get('/check-vip/:email', async (req, res) => {
+  const { email } = req.params;
 
-  try {
-    const { data, error } = await supabase
-      .from("pagamentos")
-      .select("valid_until, status")
-      .eq("email", email)
-      .order("valid_until", { ascending: false })
-      .limit(1)
-      .single();
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('email', email)
+    .eq('status', 'approved')
+    .order('created_at', { ascending: false })
+    .limit(1);
 
-    if (error) return res.status(500).json({ error: error.message });
-
-    const now = new Date();
-    const isVip = data?.status === "approved" && data?.valid_until && new Date(data.valid_until) > now;
-
-    res.json({ vip: isVip, valid_until: data?.valid_until });
-  } catch (err) {
-    console.error("Erro check-vip:", err.message);
-    res.status(500).json({ error: err.message });
+  if (error) {
+    return res.status(500).json({ vip: false, valid_until: null });
   }
+
+  if (data && data.length > 0) {
+    const payment = data[0];
+    const now = new Date();
+    const validUntil = new Date(payment.valid_until);
+
+    if (validUntil > now) {
+      return res.json({ vip: true, valid_until: validUntil });
+    }
+  }
+
+  return res.json({ vip: false, valid_until: null });
 });
 
 // =======================
