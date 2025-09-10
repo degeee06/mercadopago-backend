@@ -42,7 +42,7 @@ app.post("/create-pix", async (req, res) => {
     });
 
     // Salva no Supabase
-    await supabase.from("pagamentos").upsert(
+    await supabase.from("pagamentos").select('*')
       [{ id: result.id, email, amount: Number(amount), status: "pending" }],
       { onConflict: ["id"] }
     );
@@ -145,7 +145,7 @@ app.get('/check-vip/:email', async (req, res) => {
   const { email } = req.params;
 
   const { data, error } = await supabase
-    .from('payments')
+    .from('pagamentos') // ✅ corrigido
     .select('*')
     .eq('email', email)
     .eq('status', 'approved')
@@ -158,16 +158,16 @@ app.get('/check-vip/:email', async (req, res) => {
 
   if (data && data.length > 0) {
     const payment = data[0];
-    const now = new Date();
-    const validUntil = new Date(payment.valid_until);
+    const validUntil = payment.valid_until ? new Date(payment.valid_until) : null;
 
-    if (validUntil > now) {
+    if (validUntil && validUntil > new Date()) {
       return res.json({ vip: true, valid_until: validUntil });
     }
   }
 
   return res.json({ vip: false, valid_until: null });
 });
+
 
 // =======================
 // Inicia servidor
