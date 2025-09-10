@@ -42,7 +42,7 @@ app.post("/create-pix", async (req, res) => {
     });
 
     // Salva no Supabase
-    await supabase.from("pagamentos").select('*')
+    await supabase.from("pagamentos").upsert(
       [{ id: result.id, email, amount: Number(amount), status: "pending" }],
       { onConflict: ["id"] }
     );
@@ -59,9 +59,6 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// =======================
-// Webhook Mercado Pago
-// =======================
 // =======================
 // Webhook Mercado Pago seguro
 // =======================
@@ -106,18 +103,15 @@ app.post("/webhook", async (req, res) => {
     }
 
     // Prepara dados para atualização
-    let updateData = {};
+    let updateData = { status: paymentDetails.status };
 
-    // Atualiza status sempre
-    updateData.status = paymentDetails.status;
-
-    // Só atualiza VIP se aprovado/pago **e não houver valid_until vigente**
+    // Só atualiza VIP se aprovado/pago e não houver valid_until vigente
     const now = new Date();
     const hasVipActive = existingData?.valid_until && new Date(existingData.valid_until) > now;
 
     if ((paymentDetails.status === "approved" || paymentDetails.status === "paid") && !hasVipActive) {
       const validUntil = new Date();
-      validUntil.setDate(validUntil.getDate() + 30);
+      validUntil.setDate(validUntil.getDate() + 30); // VIP 30 dias
       updateData.valid_until = validUntil.toISOString();
     }
 
@@ -137,7 +131,6 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-
 // =======================
 // Verifica VIP pelo email
 // =======================
@@ -145,7 +138,7 @@ app.get('/check-vip/:email', async (req, res) => {
   const { email } = req.params;
 
   const { data, error } = await supabase
-    .from('pagamentos') // ✅ corrigido
+    .from('pagamentos') // ✅ tabela correta
     .select('*')
     .eq('email', email)
     .eq('status', 'approved')
@@ -153,6 +146,7 @@ app.get('/check-vip/:email', async (req, res) => {
     .limit(1);
 
   if (error) {
+    console.error("Erro ao consultar VIP:", error.message);
     return res.status(500).json({ vip: false, valid_until: null });
   }
 
@@ -167,7 +161,6 @@ app.get('/check-vip/:email', async (req, res) => {
 
   return res.json({ vip: false, valid_until: null });
 });
-
 
 // =======================
 // Inicia servidor
