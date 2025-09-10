@@ -1,110 +1,104 @@
 import express from "express";
 import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
-import crypto from "crypto";
-import { MercadoPagoConfig, Payment } from "mercadopago";
+import mercadopago from "mercadopago";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// 🔑 Config MercadoPago
+mercadopago.configure({
+  access_token: process.env.MP_ACCESS_TOKEN,
+});
 
-// Serve frontend
-app.use(express.static(path.join(__dirname, "public")));
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
+// 🔑 Config Supabase
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-// Inicializa Mercado Pago
-const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
-const payment = new Payment(mpClient);
-
-// Inicializa Supabase
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-
-// Cria PIX
-app.post("/create-pix", async (req, res) => {
-  const { amount, description, email } = req.body;
-  if (!amount || !email) return res.status(400).json({ error: "Faltando dados" });
-
+// Criar pagamento PIX
+app.post("/vip/purchase", async (req, res) => {
   try {
-    const result = await payment.create({
-      body: {
-        transaction_amount: Number(amount),
-        description: description || "Pagamento VIP",
-        payment_method_id: "pix",
-        payer: { email },
-      },
+    const { userId, plan } = req.body;
+
+    const amount = plan === "mensal" ? 9.9 : 99.9;
+
+    const payment = await mercadopago.payment.create({
+      transaction_amount: amount,
+      description: `VIP ${plan}`,
+      payment_method_id: "pix",
+      payer: { email: "comprador@test.com" },
     });
 
-    // Salva no Supabase
-    await supabase.from("pagamentos").insert([
-      { id: result.id, email, amount: Number(amount), status: "pending" }
-    ]);
+    // Salvar pagamento no Supabase
+    await supabase.from("payments").insert({
+      id: payment.response.id,
+      user_id: userId,
+      status: "pending",
+      plan,
+    });
 
     res.json({
-      id: result.id,
-      status: result.status,
-      qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
+      id: payment.response.id,
+      pixCode: payment.response.point_of_interaction.transaction_data.qr_code,
+      qrImageBase64:
+        payment.response.point_of_interaction.transaction_data.qr_code_base64,
     });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Checa status do pagamento (via Supabase)
-app.get("/status-pix/:id", async (req, res) => {
-  const id = req.params.id;
-  const { data, error } = await supabase.from("pagamentos").select("status").eq("id", id).single();
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ status: data?.status || "pending" });
-});
-
-// Webhook Mercado Pago
-app.post("/webhook", express.json(), async (req, res) => {
-  const signatureHeader = req.headers["x-signature"];
-  const secret = process.env.MP_WEBHOOK_SECRET;
-  if (!signatureHeader || !secret) return res.sendStatus(401);
-
-  // Validação da assinatura
-  const parts = signatureHeader.split(",");
-  let ts = "", v1 = "";
-  for (const p of parts) {
-    const [key, value] = p.split("=");
-    if (key === "ts") ts = value;
-    else if (key === "v1") v1 = value;
-  }
-
-  const dataId = (req.query["data.id"] || "").toLowerCase();
-  const xRequestId = req.headers["x-request-id"] || "";
-  const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
-  const computedHash = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
-  if (computedHash !== v1) return res.sendStatus(401);
-
-  console.log("Webhook validado ✅");
-
+// Confirmar pagamento
+app.get("/vip/confirm/:paymentId", async (req, res) => {
   try {
-    const paymentId = req.body?.data?.id;
-    if (!paymentId) return res.sendStatus(400);
+    const { paymentId } = req.params;
 
-    const paymentDetails = await payment.get({ id: paymentId });
+    const payment = await mercadopago.payment.findById(paymentId);
 
-    await supabase.from("pagamentos")
-      .update({ status: paymentDetails.status })
-      .eq("id", paymentId);
+    if (payment.body.status === "approved") {
+      // Atualiza pagamento
+      await supabase
+        .from("payments")
+        .update({ status: "approved" })
+        .eq("id", paymentId);
 
-    console.log("Status atualizado:", paymentDetails.status);
+      // Marca usuário como VIP
+      const userId = payment.body.additional_info?.items?.[0]?.userId;
+
+      if (userId) {
+        await supabase.from("users").update({ vip: true }).eq("id", userId);
+      }
+
+      return res.json({ success: true });
+    }
+
+    res.json({ success: false });
   } catch (err) {
-    console.error("Erro ao atualizar pagamento:", err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  res.sendStatus(200);
 });
 
-// Inicia servidor
+// Verificar status VIP do usuário
+app.get("/vip/status/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { data, error } = await supabase
+      .from("users")
+      .select("vip")
+      .eq("id", userId)
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json({ vip: data.vip });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando em http://localhost:${PORT}`));
+app.listen(PORT, () => console.log("🚀 Server rodando na porta " + PORT));
