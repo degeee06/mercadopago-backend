@@ -67,6 +67,30 @@ app.get("/status-pix/:id", async (req, res) => {
   res.json({ status: data?.status || "pending" });
 });
 
+// Checa status VIP pelo email (novo endpoint)
+app.get("/vip-status", async (req, res) => {
+  const email = req.query.email;
+  if (!email) return res.status(400).json({ error: "Faltando email" });
+
+  const { data, error } = await supabase
+    .from("vip_users")
+    .select("vip_expires_at")
+    .eq("email", email)
+    .single();
+
+  if (error && error.code !== "PGRST116") { // ignore not found
+    return res.status(500).json({ error: error.message });
+  }
+
+  const now = new Date();
+  let isVip = false;
+  if (data && new Date(data.vip_expires_at) > now) {
+    isVip = true;
+  }
+
+  res.json({ isVip });
+});
+
 // Webhook Mercado Pago
 app.post("/webhook", express.json(), async (req, res) => {
   const signatureHeader = req.headers["x-signature"];
@@ -105,6 +129,21 @@ app.post("/webhook", express.json(), async (req, res) => {
       .eq("id", paymentId);
 
     console.log("Status atualizado:", paymentId, "->", paymentDetails.status);
+
+    // Se pago ou aprovado, ativa VIP por 30 dias
+    if (["approved", "paid"].includes(paymentDetails.status.toLowerCase())) {
+      const email = paymentDetails.payer.email;
+      const vipExpiresAt = new Date();
+      vipExpiresAt.setDate(vipExpiresAt.getDate() + 30); // 30 dias de VIP
+
+      await supabase.from("vip_users").upsert(
+        [{ email, vip_expires_at: vipExpiresAt.toISOString() }],
+        { onConflict: ["email"] }
+      );
+
+      console.log(`VIP ativado para ${email} até ${vipExpiresAt}`);
+    }
+
   } catch (err) {
     console.error("Erro ao atualizar pagamento:", err.message);
   }
