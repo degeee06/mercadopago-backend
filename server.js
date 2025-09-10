@@ -44,7 +44,7 @@ app.post("/create-pix", async (req, res) => {
       [
         { id: email.toLowerCase(), email, amount: Number(amount), status: "pending" }
       ],
-      { onConflict: ["id"] } // se já existir, atualiza
+      { onConflict: ["id"] }
     );
 
     res.json({
@@ -62,12 +62,7 @@ app.post("/create-pix", async (req, res) => {
 // Checa status do pagamento (via Supabase)
 app.get("/status-pix/:id", async (req, res) => {
   const id = req.params.id.toLowerCase();
-  const { data, error } = await supabase
-    .from("pagamentos")
-    .select("status")
-    .eq("id", id)
-    .single(); // seguro agora, só terá um registro
-
+  const { data, error } = await supabase.from("pagamentos").select("status").eq("id", id).single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ status: data?.status || "pending" });
 });
@@ -97,16 +92,21 @@ app.post("/webhook", express.json(), async (req, res) => {
 
   try {
     const paymentId = req.body?.data?.id;
-    if (!paymentId) return res.sendStatus(400);
+    const payerEmail = req.body?.data?.payer?.email?.toLowerCase();
+
+    if (!paymentId || !payerEmail) {
+      console.log("Webhook sem ID ou email:", req.body);
+      return res.sendStatus(400);
+    }
 
     const paymentDetails = await payment.get({ id: paymentId });
 
-    // Atualiza o status no Supabase
+    // Atualiza o Supabase pelo email do pagador
     await supabase.from("pagamentos")
       .update({ status: paymentDetails.status })
-      .eq("id", req.body?.data?.payer?.email?.toLowerCase() || paymentId);
+      .eq("id", payerEmail);
 
-    console.log("Status atualizado:", paymentDetails.status);
+    console.log("Status atualizado:", payerEmail, "->", paymentDetails.status);
   } catch (err) {
     console.error("Erro ao atualizar pagamento:", err.message);
   }
