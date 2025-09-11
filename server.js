@@ -21,12 +21,18 @@ const client = Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TO
 const TWILIO_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 
 // -------------------- Hugging Face --------------------
+import axios from "axios";
+
 async function gerarRespostaHF(prompt) {
   try {
     const res = await axios.post(
-      "https://api-inference.huggingface.co/models/tiiuae/falcon3-7b-instruct",
+      "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct",
       { inputs: prompt },
-      { headers: { Authorization: `Bearer ${process.env.HF_API_KEY}` } }
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HF_API_KEY}`,
+        },
+      }
     );
     return res.data[0]?.generated_text || "🤖 Não consegui gerar resposta.";
   } catch (err) {
@@ -34,6 +40,7 @@ async function gerarRespostaHF(prompt) {
     return "🤖 Ocorreu um erro ao gerar a resposta.";
   }
 }
+
 
 // -------------------- Rotas --------------------
 
