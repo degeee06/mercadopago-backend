@@ -24,7 +24,7 @@ const TWILIO_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 async function gerarRespostaHF(prompt) {
   try {
     const res = await axios.post(
-      "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct",
+      "https://api-inference.huggingface.co/models/tiiuae/falcon3-7b-instruct",
       { inputs: prompt },
       { headers: { Authorization: `Bearer ${process.env.HF_API_KEY}` } }
     );
@@ -46,16 +46,22 @@ app.post("/webhook", async (req, res) => {
     const msgFrom = req.body.From;
     const msgBody = req.body.Body || "";
 
+    if (!msgFrom) {
+      console.error("Número do destinatário (msgFrom) não encontrado!");
+      return res.sendStatus(400);
+    }
+
     // Pega ou cria lead
     let { data: lead } = await supabase
       .from("leads")
       .select("*")
       .eq("phone", msgFrom)
-      .maybeSingle(); // retorna null se não existir
+      .maybeSingle();
+
+    const hoje = new Date().toISOString().split("T")[0];
 
     if (!lead) {
-      const hoje = new Date().toISOString().split("T")[0];
-      const { data: newLead, error: insertError } = await supabase
+      const { data: newLead } = await supabase
         .from("leads")
         .insert({
           name: "Cliente WhatsApp",
@@ -67,19 +73,11 @@ app.post("/webhook", async (req, res) => {
         })
         .select()
         .single();
-
-      if (insertError) {
-        console.error("Erro ao criar lead:", insertError);
-        return res.sendStatus(500);
-      }
-
       lead = newLead || { msg_count: 0, last_msg_date: hoje };
     }
 
     // Reset diário
-    const hoje = new Date().toISOString().split("T")[0];
     const lastMsgDate = lead.last_msg_date || hoje;
-
     if (lastMsgDate !== hoje) {
       await supabase
         .from("leads")
@@ -101,7 +99,7 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Resposta IA gratuita Hugging Face
+    // Resposta IA Hugging Face gratuita
     const reply = await gerarRespostaHF(msgBody);
 
     // Envia mensagem
@@ -169,5 +167,5 @@ app.post("/mp-webhook", async (req, res) => {
 });
 
 // -------------------- Servidor --------------------
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
