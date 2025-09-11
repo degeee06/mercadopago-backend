@@ -46,37 +46,48 @@ app.post("/webhook", async (req, res) => {
     const msgBody = req.body.Body || "";
 
     // Pega ou cria lead
-    let { data: lead } = await supabase
-      .from("leads")
-      .select("*")
-      .eq("phone", msgFrom)
-      .single();
+    // Pega ou cria lead
+let { data: lead } = await supabase
+  .from("leads")
+  .select("*")
+  .eq("phone", msgFrom)
+  .single();
 
-    if (!lead) {
-      const { data: newLead } = await supabase
-        .from("leads")
-        .insert({
-          name: "Cliente WhatsApp",
-          phone: msgFrom,
-          message: msgBody,
-          paid: false,
-          msg_count: 0,
-          last_msg_date: new Date().toISOString().split("T")[0]
-        })
-        .select()
-        .single();
-      lead = newLead;
-    }
+// Se não existir, cria
+if (!lead) {
+  const { data: newLead, error } = await supabase
+    .from("leads")
+    .insert({
+      name: "Cliente WhatsApp",
+      phone: msgFrom,
+      message: msgBody,
+      paid: false,
+      msg_count: 0,
+      last_msg_date: new Date().toISOString().split("T")[0]
+    })
+    .select()
+    .single();
 
-    // Reset diário
-    const hoje = new Date().toISOString().split("T")[0];
-    if (lead.last_msg_date !== hoje) {
-      await supabase
-        .from("leads")
-        .update({ msg_count: 0, last_msg_date: hoje })
-        .eq("id", lead.id);
-      lead.msg_count = 0;
-    }
+  if (error) {
+    console.error("Erro ao criar lead:", error);
+    return res.sendStatus(500);
+  }
+
+  lead = newLead;
+}
+
+// ❗ Agora lead está garantido
+const hoje = new Date().toISOString().split("T")[0];
+
+// Reset diário
+if (!lead.last_msg_date || lead.last_msg_date !== hoje) {
+  await supabase
+    .from("leads")
+    .update({ msg_count: 0, last_msg_date: hoje })
+    .eq("id", lead.id);
+  lead.msg_count = 0;
+}
+
 
     // Limite diário para não-pagos
     if (!lead.paid && lead.msg_count >= 10) {
