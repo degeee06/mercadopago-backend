@@ -47,47 +47,50 @@ app.post("/webhook", async (req, res) => {
     const msgBody = req.body.Body || "";
 
     // Pega lead existente
-    let { data: lead, error } = await supabase
-      .from("leads")
-      .select("*")
-      .eq("phone", msgFrom)
-      .single();
+    // Pega ou cria lead
+let { data: lead, error } = await supabase
+  .from("leads")
+  .select("*")
+  .eq("phone", msgFrom)
+  .maybeSingle(); // <--- permite retornar null sem quebrar
 
-    // Se não existir, cria lead
-    if (!lead) {
-      const hoje = new Date().toISOString().split("T")[0];
-      const { data: newLead, error: insertError } = await supabase
-        .from("leads")
-        .insert({
-          name: "Cliente WhatsApp",
-          phone: msgFrom,
-          message: msgBody,
-          paid: false,
-          msg_count: 0,
-          last_msg_date: hoje
-        })
-        .select()
-        .single();
+if (!lead) {
+  const hoje = new Date().toISOString().split("T")[0];
 
-      if (insertError) {
-        console.error("Erro ao criar lead:", insertError);
-        return res.sendStatus(500);
-      }
+  const { data: newLead, error: insertError } = await supabase
+    .from("leads")
+    .insert({
+      name: "Cliente WhatsApp",
+      phone: msgFrom,
+      message: msgBody,
+      paid: false,
+      msg_count: 0,
+      last_msg_date: hoje
+    })
+    .select()
+    .single();
 
-      lead = newLead; // garante que lead não seja null
-    }
+  if (insertError) {
+    console.error("Erro ao criar lead:", insertError);
+    return res.sendStatus(500);
+  }
 
-    // Agora lead existe
-    const hoje = new Date().toISOString().split("T")[0];
+  lead = newLead || { msg_count: 0, last_msg_date: hoje }; // fallback
+}
 
-    // Reset diário
-    if (!lead.last_msg_date || lead.last_msg_date !== hoje) {
-      await supabase
-        .from("leads")
-        .update({ msg_count: 0, last_msg_date: hoje })
-        .eq("id", lead.id);
-      lead.msg_count = 0;
-    }
+// Reset diário
+const hoje = new Date().toISOString().split("T")[0];
+const lastMsgDate = lead.last_msg_date || hoje;
+
+if (lastMsgDate !== hoje) {
+  await supabase
+    .from("leads")
+    .update({ msg_count: 0, last_msg_date: hoje })
+    .eq("id", lead.id);
+
+  lead.msg_count = 0;
+}
+
 
     // Limite diário para não-pagos
     if (!lead.paid && lead.msg_count >= 10) {
