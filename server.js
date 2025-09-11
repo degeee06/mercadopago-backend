@@ -1,169 +1,163 @@
 import express from "express";
-import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
-import crypto from "crypto";
-import { MercadoPagoConfig, Payment } from "mercadopago";
+import dotenv from "dotenv";
+import bodyParser from "body-parser";
 import { createClient } from "@supabase/supabase-js";
+import Twilio from "twilio";
+import axios from "axios";
 
+dotenv.config();
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// -------------------- Supabase --------------------
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-// Serve frontend (opcional)
-app.use(express.static(path.join(__dirname, "public")));
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
+// -------------------- Twilio --------------------
+const client = Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+const TWILIO_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 
-// Inicializa Mercado Pago
-const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
-const payment = new Payment(mpClient);
-
-// Inicializa Supabase
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-
-// =======================
-// Cria pagamento PIX
-// =======================
-app.post("/create-pix", async (req, res) => {
-  const { amount, description, email } = req.body;
-  if (!amount || !email) return res.status(400).json({ error: "Faltando dados" });
-
+// -------------------- Hugging Face --------------------
+async function gerarRespostaHF(prompt) {
   try {
-    const result = await payment.create({
-      body: {
-        transaction_amount: Number(amount),
-        description: description || "Pagamento VIP",
-        payment_method_id: "pix",
-        payer: { email },
-      },
-    });
-
-    // Salva no Supabase
-    await supabase.from("pagamentos").upsert(
-      [{ id: result.id, email, amount: Number(amount), status: "pending" }],
-      { onConflict: ["id"] }
+    const res = await axios.post(
+      "https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct",
+      { inputs: prompt },
+      { headers: { Authorization: `Bearer ${process.env.HF_API_KEY}` } }
     );
-
-    res.json({
-      id: result.id,
-      status: result.status,
-      qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
-    });
+    return res.data[0]?.generated_text || "🤖 Não consegui gerar resposta.";
   } catch (err) {
-    console.error("Erro create-pix:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("Erro Hugging Face:", err.response?.data || err.message);
+    return "🤖 Ocorreu um erro ao gerar a resposta.";
   }
-});
+}
 
-// =======================
-// Webhook Mercado Pago seguro
-// =======================
+// -------------------- Rotas --------------------
+
+// Teste do bot
+app.get("/", (req, res) => res.send("Bot rodando ✅"));
+
+// Webhook Twilio (WhatsApp)
 app.post("/webhook", async (req, res) => {
   try {
-    const signature = req.headers["x-signature"];
-    const secret = process.env.MP_WEBHOOK_SECRET;
-    if (!signature || !secret) return res.sendStatus(401);
+    const msgFrom = req.body.From;
+    const msgBody = req.body.Body || "";
 
-    // Validação da assinatura
-    const parts = signature.split(",");
-    let ts = "", v1 = "";
-    for (const p of parts) {
-      const [key, value] = p.split("=");
-      if (key === "ts") ts = value;
-      if (key === "v1") v1 = value;
-    }
-    const dataId = (req.query["data.id"] || "").toLowerCase();
-    const xRequestId = req.headers["x-request-id"] || "";
-    const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
-    const computedHash = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
-    if (computedHash !== v1) return res.sendStatus(401);
-
-    console.log("Webhook validado ✅");
-
-    const paymentId = req.body?.data?.id;
-    if (!paymentId) return res.sendStatus(400);
-
-    // Busca status atual no Mercado Pago
-    const paymentDetails = await payment.get({ id: paymentId });
-
-    // Busca registro atual no Supabase
-    const { data: existingData, error: fetchError } = await supabase
-      .from("pagamentos")
-      .select("status, valid_until")
-      .eq("id", paymentId)
+    // Pega ou cria lead
+    let { data: lead } = await supabase
+      .from("leads")
+      .select("*")
+      .eq("phone", msgFrom)
       .single();
 
-    if (fetchError) {
-      console.error("Erro ao buscar pagamento no Supabase:", fetchError.message);
-      return res.sendStatus(500);
+    if (!lead) {
+      const { data: newLead } = await supabase
+        .from("leads")
+        .insert({
+          name: "Cliente WhatsApp",
+          phone: msgFrom,
+          message: msgBody,
+          paid: false,
+          msg_count: 0,
+          last_msg_date: new Date().toISOString().split("T")[0]
+        })
+        .select()
+        .single();
+      lead = newLead;
     }
 
-    // Prepara dados para atualização
-    let updateData = { status: paymentDetails.status };
-
-    // Só atualiza VIP se aprovado/pago e não houver valid_until vigente
-    const now = new Date();
-    const hasVipActive = existingData?.valid_until && new Date(existingData.valid_until) > now;
-
-    if ((paymentDetails.status === "approved" || paymentDetails.status === "paid") && !hasVipActive) {
-      const validUntil = new Date();
-      validUntil.setDate(validUntil.getDate() + 30); // VIP 30 dias
-      updateData.valid_until = validUntil.toISOString();
+    // Reset diário
+    const hoje = new Date().toISOString().split("T")[0];
+    if (lead.last_msg_date !== hoje) {
+      await supabase
+        .from("leads")
+        .update({ msg_count: 0, last_msg_date: hoje })
+        .eq("id", lead.id);
+      lead.msg_count = 0;
     }
 
-    // Atualiza Supabase
-    const { error: updateError } = await supabase
-      .from("pagamentos")
-      .update(updateData)
-      .eq("id", paymentId);
+    // Limite diário para não-pagos
+    if (!lead.paid && lead.msg_count >= 10) {
+      await client.messages.create({
+        from: TWILIO_NUMBER,
+        to: msgFrom,
+        body:
+          "🚀 Você atingiu o limite diário de 10 mensagens grátis.\n\n" +
+          "👉 Para desbloquear uso ilimitado, faça o upgrade para o plano VIP: \n" +
+          process.env.MP_PAYMENT_LINK
+      });
+      return res.sendStatus(200);
+    }
 
-    if (updateError) console.error("Erro ao atualizar Supabase:", updateError.message);
-    else console.log(`Pagamento ${paymentId} atualizado para ${paymentDetails.status}`);
+    // Resposta Hugging Face
+    const reply = await gerarRespostaHF(msgBody);
+
+    // Envia resposta
+    await client.messages.create({
+      from: TWILIO_NUMBER,
+      to: msgFrom,
+      body: reply,
+    });
+
+    // Atualiza contador
+    await supabase
+      .from("leads")
+      .update({ msg_count: (lead.msg_count || 0) + 1 })
+      .eq("id", lead.id);
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("Erro webhook:", err.message);
+    console.error("Erro webhook Twilio:", err);
     res.sendStatus(500);
   }
 });
 
-// =======================
-// Verifica VIP pelo email
-// =======================
-app.get('/check-vip/:email', async (req, res) => {
-  const { email } = req.params;
+// Webhook Mercado Pago
+app.post("/mp-webhook", async (req, res) => {
+  try {
+    const tokenRecebido = req.query.token;
+    if (tokenRecebido !== process.env.MP_WEBHOOK_TOKEN) return res.status(403).send("Forbidden");
 
-  const { data, error } = await supabase
-    .from('pagamentos') // ✅ tabela correta
-    .select('*')
-    .eq('email', email)
-    .eq('status', 'approved')
-    .order('created_at', { ascending: false })
-    .limit(1);
+    const data = req.body;
 
-  if (error) {
-    console.error("Erro ao consultar VIP:", error.message);
-    return res.status(500).json({ vip: false, valid_until: null });
-  }
+    if (data.type === "payment" || data.type === "preapproval") {
+      const payerEmail = data.data?.payer?.email || data.data?.payer_email;
 
-  if (data && data.length > 0) {
-    const payment = data[0];
-    const validUntil = payment.valid_until ? new Date(payment.valid_until) : null;
+      // Atualiza lead no Supabase
+      const { error } = await supabase
+        .from("leads")
+        .update({ paid: true })
+        .eq("email", payerEmail);
 
-    if (validUntil && validUntil > new Date()) {
-      return res.json({ vip: true, valid_until: validUntil });
+      if (error) console.error("Erro ao atualizar Supabase:", error);
+
+      // Envia confirmação WhatsApp
+      if (payerEmail) {
+        const { data: lead } = await supabase
+          .from("leads")
+          .select("phone")
+          .eq("email", payerEmail)
+          .single();
+
+        if (lead?.phone) {
+          await client.messages.create({
+            from: TWILIO_NUMBER,
+            to: lead.phone,
+            body: "Pagamento recebido com sucesso! ✅ Obrigado pelo seu Pix."
+          });
+        }
+      }
     }
-  }
 
-  return res.json({ vip: false, valid_until: null });
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("Erro webhook MP:", err);
+    res.sendStatus(500);
+  }
 });
 
-// =======================
-// Inicia servidor
-// =======================
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando em http://localhost:${PORT}`));
+// -------------------- Servidor --------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
