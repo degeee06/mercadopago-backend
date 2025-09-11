@@ -47,11 +47,11 @@ app.post("/webhook", async (req, res) => {
     const msgBody = req.body.Body || "";
 
     // Pega ou cria lead
-    let { data: lead, error } = await supabase
+    let { data: lead } = await supabase
       .from("leads")
       .select("*")
       .eq("phone", msgFrom)
-      .maybeSingle(); // <-- permite retornar null
+      .maybeSingle(); // retorna null se não existir
 
     if (!lead) {
       const hoje = new Date().toISOString().split("T")[0];
@@ -73,7 +73,7 @@ app.post("/webhook", async (req, res) => {
         return res.sendStatus(500);
       }
 
-      lead = newLead || { msg_count: 0, last_msg_date: hoje }; // fallback seguro
+      lead = newLead || { msg_count: 0, last_msg_date: hoje };
     }
 
     // Reset diário
@@ -85,7 +85,6 @@ app.post("/webhook", async (req, res) => {
         .from("leads")
         .update({ msg_count: 0, last_msg_date: hoje })
         .eq("id", lead.id);
-
       lead.msg_count = 0;
     }
 
