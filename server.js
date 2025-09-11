@@ -1,3 +1,4 @@
+// index.js
 import express from "express";
 import dotenv from "dotenv";
 import bodyParser from "body-parser";
@@ -40,57 +41,53 @@ async function gerarRespostaHF(prompt) {
 app.get("/", (req, res) => res.send("Bot rodando ✅"));
 
 // Webhook Twilio (WhatsApp)
-// Webhook Twilio (WhatsApp)
 app.post("/webhook", async (req, res) => {
   try {
     const msgFrom = req.body.From;
     const msgBody = req.body.Body || "";
 
-    // Pega lead existente
     // Pega ou cria lead
-let { data: lead, error } = await supabase
-  .from("leads")
-  .select("*")
-  .eq("phone", msgFrom)
-  .maybeSingle(); // <--- permite retornar null sem quebrar
+    let { data: lead, error } = await supabase
+      .from("leads")
+      .select("*")
+      .eq("phone", msgFrom)
+      .maybeSingle(); // <-- permite retornar null
 
-if (!lead) {
-  const hoje = new Date().toISOString().split("T")[0];
+    if (!lead) {
+      const hoje = new Date().toISOString().split("T")[0];
+      const { data: newLead, error: insertError } = await supabase
+        .from("leads")
+        .insert({
+          name: "Cliente WhatsApp",
+          phone: msgFrom,
+          message: msgBody,
+          paid: false,
+          msg_count: 0,
+          last_msg_date: hoje
+        })
+        .select()
+        .single();
 
-  const { data: newLead, error: insertError } = await supabase
-    .from("leads")
-    .insert({
-      name: "Cliente WhatsApp",
-      phone: msgFrom,
-      message: msgBody,
-      paid: false,
-      msg_count: 0,
-      last_msg_date: hoje
-    })
-    .select()
-    .single();
+      if (insertError) {
+        console.error("Erro ao criar lead:", insertError);
+        return res.sendStatus(500);
+      }
 
-  if (insertError) {
-    console.error("Erro ao criar lead:", insertError);
-    return res.sendStatus(500);
-  }
+      lead = newLead || { msg_count: 0, last_msg_date: hoje }; // fallback seguro
+    }
 
-  lead = newLead || { msg_count: 0, last_msg_date: hoje }; // fallback
-}
+    // Reset diário
+    const hoje = new Date().toISOString().split("T")[0];
+    const lastMsgDate = lead.last_msg_date || hoje;
 
-// Reset diário
-const hoje = new Date().toISOString().split("T")[0];
-const lastMsgDate = lead.last_msg_date || hoje;
+    if (lastMsgDate !== hoje) {
+      await supabase
+        .from("leads")
+        .update({ msg_count: 0, last_msg_date: hoje })
+        .eq("id", lead.id);
 
-if (lastMsgDate !== hoje) {
-  await supabase
-    .from("leads")
-    .update({ msg_count: 0, last_msg_date: hoje })
-    .eq("id", lead.id);
-
-  lead.msg_count = 0;
-}
-
+      lead.msg_count = 0;
+    }
 
     // Limite diário para não-pagos
     if (!lead.paid && lead.msg_count >= 10) {
@@ -128,6 +125,49 @@ if (lastMsgDate !== hoje) {
   }
 });
 
+// Webhook Mercado Pago
+app.post("/mp-webhook", async (req, res) => {
+  try {
+    const tokenRecebido = req.query.token;
+    if (tokenRecebido !== process.env.MP_WEBHOOK_TOKEN) return res.status(403).send("Forbidden");
+
+    const data = req.body;
+
+    if (data.type === "payment" || data.type === "preapproval") {
+      const payerEmail = data.data?.payer?.email || data.data?.payer_email;
+
+      // Atualiza lead no Supabase
+      const { error } = await supabase
+        .from("leads")
+        .update({ paid: true })
+        .eq("email", payerEmail);
+
+      if (error) console.error("Erro ao atualizar Supabase:", error);
+
+      // Envia confirmação WhatsApp
+      if (payerEmail) {
+        const { data: lead } = await supabase
+          .from("leads")
+          .select("phone")
+          .eq("email", payerEmail)
+          .maybeSingle();
+
+        if (lead?.phone) {
+          await client.messages.create({
+            from: TWILIO_NUMBER,
+            to: lead.phone,
+            body: "Pagamento recebido com sucesso! ✅ Obrigado pelo seu Pix."
+          });
+        }
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("Erro webhook MP:", err);
+    res.sendStatus(500);
+  }
+});
 
 // -------------------- Servidor --------------------
 const PORT = process.env.PORT || 10000;
