@@ -103,7 +103,14 @@
 
   <script>
     const backendURL = "https://agendamento-xyld.onrender.com";
-    const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
+    const emailsPorCliente = {
+    cliente1: "amorimmm60@gmail.com",
+    cliente2: "cliente2@email.com",
+    cliente3: "cliente3@email.com"
+  };
+
+    const customerEmail = emailsPorCliente[cliente] || "amorimmm60@gmail.com";
+
     let currentPaymentId = null;
     let statusInterval = null;
     let canSchedule = true;
@@ -213,3 +220,4 @@
   </script>
 </body>
 </html>
+
