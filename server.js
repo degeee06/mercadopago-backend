@@ -95,7 +95,52 @@ app.get("/:cliente", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ---------------- Agendar ----------------
+
+// ---------------- Webhook MercadoPago ----------------
+app.post("/webhook/mercadopago", async (req, res) => {
+  try {
+    const payment = req.body; // recebe o payload do MercadoPago
+    const { email, status } = payment;
+
+    // Atualiza ou cria pagamento no Supabase
+    await supabase
+      .from("pagamentos")
+      .upsert([{
+        id: payment.id,
+        email,
+        amount: payment.transaction_amount,
+        status,
+        valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000) // válido por 1 dia
+      }]);
+
+    // ---------------- Verifica limite de agendamentos ----------------
+    // Se o status do pagamento for 'approved', libera agendamento ilimitado
+    if (status !== "approved") {
+      // Conta quantos agendamentos já existem hoje para este email
+      const { data: agendamentosHoje } = await supabase
+        .from("agendamentos")
+        .select("*")
+        .eq("email", email)
+        .eq("data", new Date().toISOString().split("T")[0]) // hoje
+        .neq("status", "cancelado");
+
+      if (agendamentosHoje.length >= 3) {
+        console.log(`Limite atingido para ${email}, plano free`);
+        // Aqui você pode enviar notificação ou bloquear novos agendamentos
+      }
+    }
+
+    res.status(200).send("OK");
+  } catch (err) {
+    console.error("Erro webhook MP:", err);
+    res.status(500).send("Erro interno");
+  }
+});
+
+
+
+
+// ---------------- Agendar com limite para free ----------------
 app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
   try {
     const cliente = req.params.cliente;
@@ -105,37 +150,63 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
     if (!Nome || !Email || !Telefone || !Data || !Horario)
       return res.status(400).json({ msg: "Todos os campos obrigatórios" });
 
+    // 1️⃣ Verifica pagamento ativo
+    const { data: pagamento } = await supabase
+      .from("pagamentos")
+      .select("*")
+      .eq("email", Email)
+      .eq("status", "approved")
+      .gte("valid_until", new Date())
+      .single();
+
+    const isPremium = !!pagamento;
+
+    // 2️⃣ Verifica limite para free
+    if (!isPremium) {
+      const { data: agendamentosHoje } = await supabase
+        .from("agendamentos")
+        .select("*")
+        .eq("email", Email)
+        .eq("data", Data)
+        .neq("status", "cancelado");
+
+      if (agendamentosHoje.length >= 3) {
+        return res.status(400).json({ msg: "Limite de 3 agendamentos por dia para plano free" });
+      }
+    }
+
+    // 3️⃣ Checa disponibilidade do horário
     const livre = await horarioDisponivel(cliente, Data, Horario);
     if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
 
+    // 4️⃣ Remove agendamento cancelado no mesmo horário
+    await supabase
+      .from("agendamentos")
+      .delete()
+      .eq("cliente", cliente)
+      .eq("data", Data)
+      .eq("horario", Horario)
+      .eq("status", "cancelado");
 
-    // Remove qualquer agendamento cancelado no mesmo horário e data
-await supabase
-  .from("agendamentos")
-  .delete()
-  .eq("cliente", cliente)
-  .eq("data", Data)
-  .eq("horario", Horario)
-  .eq("status", "cancelado");
+    // 5️⃣ Insere novo agendamento
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .insert([{
+        cliente,
+        nome: Nome,
+        email: Email,
+        telefone: Telefone,
+        data: Data,
+        horario: Horario,
+        status: isPremium ? "confirmado" : "pendente",
+        confirmado: isPremium // confirma automaticamente se pago
+      }])
+      .select()
+      .single();
 
-// Agora insere o novo agendamento
-const { data, error } = await supabase
-  .from("agendamentos")
-  .insert([{
-    cliente,
-    nome: Nome,
-    email: Email,
-    telefone: Telefone,
-    data: Data,
-    horario: Horario,
-    status: "pendente",
-    confirmado: false
-  }])
-  .select()
-  .single();
+    if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
 
-if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
-
+    // 6️⃣ Salva no Google Sheets
     const doc = await accessSpreadsheet(cliente);
     const sheet = doc.sheetsByIndex[0];
     await ensureDynamicHeaders(sheet, Object.keys(data));
@@ -147,6 +218,30 @@ if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
     res.status(500).json({ msg: "Erro interno" });
   }
 });
+
+// ---------------- Webhook MercadoPago ----------------
+app.post("/webhook/mercadopago", async (req, res) => {
+  try {
+    const payment = req.body;
+    const { email, status } = payment;
+
+    await supabase
+      .from("pagamentos")
+      .upsert([{
+        id: payment.id,
+        email,
+        amount: payment.transaction_amount,
+        status,
+        valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000) // válido por 1 dia
+      }]);
+
+    res.status(200).send("OK");
+  } catch (err) {
+    console.error("Erro webhook MP:", err);
+    res.status(500).send("Erro interno");
+  }
+});
+
 
 // ---------------- Confirmar ----------------
 app.post("/confirmar/:cliente/:id", authMiddleware, async (req, res) => {
