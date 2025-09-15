@@ -76,6 +76,16 @@
     #copiar.copiado {
       background: #218838;
     }
+    #vipNotice {
+      margin-top: 20px;
+      padding: 12px;
+      background: #fffbe6;
+      border: 1px solid #ffe58f;
+      border-radius: 8px;
+      display: none;
+      font-weight: bold;
+      color: #d48806;
+    }
   </style>
 </head>
 <body>
@@ -83,6 +93,8 @@
 
   <input type="number" id="amount" placeholder="Valor (R$)" step="0.01" min="1" />
   <button onclick="gerarPix()">Gerar QR Code PIX</button>
+
+  <div id="vipNotice">Você atingiu o limite de agendamentos gratuitos! Faça upgrade VIP para agendar mais.</div>
 
   <div id="qr"></div>
   <p id="pixCode"></p>
@@ -93,13 +105,40 @@
     const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
     let currentPaymentId = null;
     let statusInterval = null;
+    let canSchedule = true;
 
-    async function gerarPix() {
-      const amount = parseFloat(document.getElementById("amount").value);
-      if (!amount || amount <= 0) {
-        return alert("Digite um valor válido maior que R$ 0,00");
+    async function agendar(dataAgendamento) {
+      if (!canSchedule) {
+        alert("Você precisa pagar o VIP para agendar mais.");
+        return gerarPix(); // abre PIX automaticamente
       }
 
+      try {
+        const res = await fetch("/agendar/cliente1", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem("token") },
+          body: JSON.stringify(dataAgendamento)
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+          if (result.msg && result.msg.includes("Limite de 3 agendamentos")) {
+            // Mostra aviso VIP e abre PIX automaticamente
+            document.getElementById("vipNotice").style.display = "block";
+            canSchedule = false;
+            return gerarPix();
+          }
+          return alert(result.msg || "Erro ao agendar");
+        }
+
+        alert("Agendamento realizado com sucesso!");
+      } catch (err) {
+        alert("Erro ao agendar: " + err.message);
+      }
+    }
+
+    async function gerarPix() {
+      const amount = parseFloat(document.getElementById("amount").value) || 0.01;
       try {
         const res = await fetch("/create-pix", {
           method: "POST",
@@ -119,7 +158,6 @@
         setStatus("pending", "Aguardando pagamento... ⏳");
 
         statusInterval = setInterval(checkStatus, 4000);
-
       } catch (err) {
         alert("Erro ao gerar PIX: " + err.message);
       }
@@ -135,6 +173,9 @@
         if (data.status === "approved" || data.status === "paid") {
           setStatus("approved", "Pagamento aprovado ✅");
           clearInterval(statusInterval);
+          canSchedule = true; // agora o usuário pode agendar novamente
+          document.getElementById("vipNotice").style.display = "none";
+          alert("VIP ativo! Você pode continuar agendando.");
         } else if (data.status === "rejected") {
           setStatus("rejected", "Pagamento recusado ❌");
           clearInterval(statusInterval);
