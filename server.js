@@ -4,10 +4,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { createClient } from "@supabase/supabase-js";
-
+import mercadopago from "mercadopago";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-
+mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
 // ---------------- Supabase ----------------
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -118,7 +118,7 @@ app.post("/webhook/mercadopago", async (req, res) => {
   }
 });
 
-// ---------------- Agendar com limite para free ----------------
+// ---------------- Agendar com limite para free e pagamento teste ----------------
 app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
   try {
     const cliente = req.params.cliente;
@@ -184,6 +184,28 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
 
     if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
 
+    // ---------------- Pagamento teste MercadoPago ----------------
+    if (!isPremium) {
+      const pagamentoMP = await mercadopago.payment.create({
+        transaction_amount: 0.01, // valor de teste
+        description: `Agendamento ${data.id} - ${Nome}`,
+        payment_method_id: "pix", // ou "bolbradesco", "card", etc.
+        payer: {
+          email: Email
+        }
+      });
+
+      await supabase
+        .from("pagamentos")
+        .upsert([{
+          id: pagamentoMP.body.id,
+          email: Email,
+          amount: pagamentoMP.body.transaction_amount,
+          status: pagamentoMP.body.status,
+          valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        }]);
+    }
+
     // Salva no Google Sheets
     const doc = await accessSpreadsheet(cliente);
     const sheet = doc.sheetsByIndex[0];
@@ -196,6 +218,7 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
     res.status(500).json({ msg: "Erro interno" });
   }
 });
+
 
 // ---------------- Confirmar ----------------
 app.post("/confirmar/:cliente/:id", authMiddleware, async (req, res) => {
