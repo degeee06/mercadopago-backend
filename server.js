@@ -68,23 +68,23 @@ async function ensureDynamicHeaders(sheet, newKeys) {
   }
 }
 
-
 // ---------------- Disponibilidade ----------------
-async function horarioDisponivel(cliente, data, horario) {
-  const { data: agendamentos, error } = await supabase
+async function horarioDisponivel(cliente, data, horario, ignoreId = null) {
+  let query = supabase
     .from("agendamentos")
     .select("*")
     .eq("cliente", cliente)
     .eq("data", data)
     .eq("horario", horario)
-    .neq("status", "cancelado"); // só bloqueia horários não cancelados
+    .neq("status", "cancelado");
 
+  if (ignoreId) query = query.neq("id", ignoreId);
+
+  const { data: agendamentos, error } = await query;
   if (error) throw error;
 
-  return agendamentos.length === 0; // se não houver agendamento ativo, horário livre
+  return agendamentos.length === 0;
 }
-
-
 
 // ---------------- Rotas ----------------
 app.get("/", (req, res) => res.send("Servidor rodando"));
@@ -93,130 +93,6 @@ app.get("/:cliente", (req, res) => {
   const cliente = req.params.cliente;
   if (!clientesValidos.includes(cliente)) return res.status(404).send("Cliente não encontrado");
   res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-
-// ---------------- Webhook MercadoPago ----------------
-app.post("/webhook/mercadopago", async (req, res) => {
-  try {
-    const payment = req.body; // recebe o payload do MercadoPago
-    const { email, status } = payment;
-
-    // Atualiza ou cria pagamento no Supabase
-    await supabase
-      .from("pagamentos")
-      .upsert([{
-        id: payment.id,
-        email,
-        amount: payment.transaction_amount,
-        status,
-        valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000) // válido por 1 dia
-      }]);
-
-    // ---------------- Verifica limite de agendamentos ----------------
-    // Se o status do pagamento for 'approved', libera agendamento ilimitado
-    if (status !== "approved") {
-      // Conta quantos agendamentos já existem hoje para este email
-      const { data: agendamentosHoje } = await supabase
-        .from("agendamentos")
-        .select("*")
-        .eq("email", email)
-        .eq("data", new Date().toISOString().split("T")[0]) // hoje
-        .neq("status", "cancelado");
-
-      if (agendamentosHoje.length >= 3) {
-        console.log(`Limite atingido para ${email}, plano free`);
-        // Aqui você pode enviar notificação ou bloquear novos agendamentos
-      }
-    }
-
-    res.status(200).send("OK");
-  } catch (err) {
-    console.error("Erro webhook MP:", err);
-    res.status(500).send("Erro interno");
-  }
-});
-
-
-
-
-// ---------------- Agendar com limite para free ----------------
-app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
-  try {
-    const cliente = req.params.cliente;
-    if (req.clienteId !== cliente) return res.status(403).json({ msg: "Acesso negado" });
-
-    const { Nome, Email, Telefone, Data, Horario } = req.body;
-    if (!Nome || !Email || !Telefone || !Data || !Horario)
-      return res.status(400).json({ msg: "Todos os campos obrigatórios" });
-
-    // 1️⃣ Verifica pagamento ativo
-    const { data: pagamento } = await supabase
-      .from("pagamentos")
-      .select("*")
-      .eq("email", Email)
-      .eq("status", "approved")
-      .gte("valid_until", new Date())
-      .single();
-
-    const isPremium = !!pagamento;
-
-    // 2️⃣ Verifica limite para free
-    if (!isPremium) {
-      const { data: agendamentosHoje } = await supabase
-        .from("agendamentos")
-        .select("*")
-        .eq("email", Email)
-        .eq("data", Data)
-        .neq("status", "cancelado");
-
-      if (agendamentosHoje.length >= 3) {
-        return res.status(400).json({ msg: "Limite de 3 agendamentos por dia para plano free" });
-      }
-    }
-
-    // 3️⃣ Checa disponibilidade do horário
-    const livre = await horarioDisponivel(cliente, Data, Horario);
-    if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
-
-    // 4️⃣ Remove agendamento cancelado no mesmo horário
-    await supabase
-      .from("agendamentos")
-      .delete()
-      .eq("cliente", cliente)
-      .eq("data", Data)
-      .eq("horario", Horario)
-      .eq("status", "cancelado");
-
-    // 5️⃣ Insere novo agendamento
-    const { data, error } = await supabase
-      .from("agendamentos")
-      .insert([{
-        cliente,
-        nome: Nome,
-        email: Email,
-        telefone: Telefone,
-        data: Data,
-        horario: Horario,
-        status: isPremium ? "confirmado" : "pendente",
-        confirmado: isPremium // confirma automaticamente se pago
-      }])
-      .select()
-      .single();
-
-    if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
-
-    // 6️⃣ Salva no Google Sheets
-    const doc = await accessSpreadsheet(cliente);
-    const sheet = doc.sheetsByIndex[0];
-    await ensureDynamicHeaders(sheet, Object.keys(data));
-    await sheet.addRow(data);
-
-    res.json({ msg: "Agendamento realizado com sucesso!", agendamento: data });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Erro interno" });
-  }
 });
 
 // ---------------- Webhook MercadoPago ----------------
@@ -242,14 +118,93 @@ app.post("/webhook/mercadopago", async (req, res) => {
   }
 });
 
+// ---------------- Agendar com limite para free ----------------
+app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
+  try {
+    const cliente = req.params.cliente;
+    if (req.clienteId !== cliente) return res.status(403).json({ msg: "Acesso negado" });
+
+    const { Nome, Email, Telefone, Data, Horario } = req.body;
+    if (!Nome || !Email || !Telefone || !Data || !Horario)
+      return res.status(400).json({ msg: "Todos os campos obrigatórios" });
+
+    // Verifica pagamento ativo
+    const { data: pagamento } = await supabase
+      .from("pagamentos")
+      .select("*")
+      .eq("email", Email)
+      .eq("status", "approved")
+      .gte("valid_until", new Date())
+      .single();
+
+    const isPremium = !!pagamento;
+
+    // Limite para free
+    if (!isPremium) {
+      const { data: agendamentosHoje } = await supabase
+        .from("agendamentos")
+        .select("*")
+        .eq("email", Email)
+        .eq("data", Data)
+        .neq("status", "cancelado");
+
+      if (agendamentosHoje.length >= 3) {
+        return res.status(400).json({ msg: "Limite de 3 agendamentos por dia para plano free" });
+      }
+    }
+
+    // Checa disponibilidade do horário
+    const livre = await horarioDisponivel(cliente, Data, Horario);
+    if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
+
+    // Remove agendamento cancelado no mesmo horário
+    await supabase
+      .from("agendamentos")
+      .delete()
+      .eq("cliente", cliente)
+      .eq("data", Data)
+      .eq("horario", Horario)
+      .eq("status", "cancelado");
+
+    // Insere novo agendamento
+    const { data, error } = await supabase
+      .from("agendamentos")
+      .insert([{
+        cliente,
+        nome: Nome,
+        email: Email,
+        telefone: Telefone,
+        data: Data,
+        horario: Horario,
+        status: isPremium ? "confirmado" : "pendente",
+        confirmado: isPremium
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
+
+    // Salva no Google Sheets
+    const doc = await accessSpreadsheet(cliente);
+    const sheet = doc.sheetsByIndex[0];
+    await ensureDynamicHeaders(sheet, Object.keys(data));
+    await sheet.addRow(data);
+
+    res.json({ msg: "Agendamento realizado com sucesso!", agendamento: data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ msg: "Erro interno" });
+  }
+});
 
 // ---------------- Confirmar ----------------
 app.post("/confirmar/:cliente/:id", authMiddleware, async (req, res) => {
   try {
     const cliente = req.params.cliente;
+    const { id } = req.params;
+
     if (req.clienteId !== cliente) return res.status(403).json({ msg: "Acesso negado" });
 
-    const { id } = req.params;
     const { data, error } = await supabase
       .from("agendamentos")
       .update({ status: "confirmado", confirmado: true })
@@ -257,6 +212,7 @@ app.post("/confirmar/:cliente/:id", authMiddleware, async (req, res) => {
       .eq("cliente", cliente)
       .select()
       .single();
+
     if (error) return res.status(500).json({ msg: "Erro ao confirmar agendamento" });
     if (!data) return res.status(404).json({ msg: "Agendamento não encontrado" });
 
@@ -321,10 +277,10 @@ app.post("/cancelar/:cliente/:id", authMiddleware, async (req, res) => {
 app.post("/reagendar/:cliente/:id", authMiddleware, async (req, res) => {
   try {
     const cliente = req.params.cliente;
-    if (req.clienteId !== cliente) return res.status(403).json({ msg: "Acesso negado" });
-
     const { id } = req.params;
     const { novaData, novoHorario } = req.body;
+
+    if (req.clienteId !== cliente) return res.status(403).json({ msg: "Acesso negado" });
     if (!novaData || !novoHorario) return res.status(400).json({ msg: "Nova data e horário obrigatórios" });
 
     const { data: agendamento, error: errorGet } = await supabase
@@ -336,12 +292,10 @@ app.post("/reagendar/:cliente/:id", authMiddleware, async (req, res) => {
 
     if (errorGet || !agendamento) return res.status(404).json({ msg: "Agendamento não encontrado" });
 
-    // Checa se novo horário está livre, ignorando o próprio ID
-   const livre = await horarioDisponivel(cliente, novaData, novoHorario, id);
-   if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
+    // Checa se novo horário está livre
+    const livre = await horarioDisponivel(cliente, novaData, novoHorario, id);
+    if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
 
-
-    // Atualiza o agendamento existente
     const { data: novo, error: errorUpdate } = await supabase
       .from("agendamentos")
       .update({
@@ -353,6 +307,7 @@ app.post("/reagendar/:cliente/:id", authMiddleware, async (req, res) => {
       .eq("id", id)
       .select()
       .single();
+
     if (errorUpdate) return res.status(500).json({ msg: "Erro ao reagendar" });
 
     const doc = await accessSpreadsheet(cliente);
@@ -397,5 +352,3 @@ app.get("/meus-agendamentos/:cliente", authMiddleware, async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
-
-
