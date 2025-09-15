@@ -102,6 +102,7 @@
   <button id="copiar" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
+    const backendURL = "https://agendamento-xyld.onrender.com";
     const customerEmail = "amorimmm60@gmail.com"; // email real do cliente
     let currentPaymentId = null;
     let statusInterval = null;
@@ -114,9 +115,12 @@
       }
 
       try {
-        const res = await fetch("/agendar/cliente1", {
+        const res = await fetch(`${backendURL}/agendar/cliente1`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + localStorage.getItem("token") },
+          headers: { 
+            "Content-Type": "application/json", 
+            "Authorization": "Bearer " + localStorage.getItem("token") 
+          },
           body: JSON.stringify(dataAgendamento)
         });
 
@@ -140,7 +144,7 @@
     async function gerarPix() {
       const amount = parseFloat(document.getElementById("amount").value) || 0.01;
       try {
-        const res = await fetch("/create-pix", {
+        const res = await fetch(`${backendURL}/create-pix`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ amount, description: "Pagamento VIP", email: customerEmail })
@@ -167,7 +171,7 @@
       if (!currentPaymentId) return;
 
       try {
-        const res = await fetch(`/status-pix/${currentPaymentId}`);
+        const res = await fetch(`${backendURL}/status-pix/${currentPaymentId}`);
         const data = await res.json();
 
         if (data.status === "approved" || data.status === "paid") {
