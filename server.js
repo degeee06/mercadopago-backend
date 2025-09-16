@@ -4,8 +4,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { createClient } from "@supabase/supabase-js";
-import pkg from "mercadopago"; // Ajuste para ESM
+import pkg from "mercadopago"; 
 const mercadopago = pkg;
+
+mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
+
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
