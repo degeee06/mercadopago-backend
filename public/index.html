@@ -2,221 +2,68 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>PIX Mercado Pago Produção</title>
+  <title>PIX Mercado Pago Sandbox</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 420px;
-      margin: 40px auto;
-      text-align: center;
-      background: #f9f9f9;
-      padding: 20px;
-      border-radius: 12px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-    input, button {
-      padding: 12px;
-      margin: 10px 0;
-      width: 100%;
-      font-size: 16px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-    }
-    button {
-      cursor: pointer;
-      border: none;
-      background: #0077cc;
-      color: white;
-      font-weight: bold;
-      transition: 0.2s;
-    }
-    button:hover {
-      background: #005fa3;
-    }
-    #qr img {
-      margin-top: 20px;
-      max-width: 280px;
-      border: 4px solid #0077cc;
-      border-radius: 12px;
-    }
-    #pixCode {
-      margin-top: 12px;
-      word-wrap: break-word;
-      font-size: 14px;
-      color: #333;
-      background: #eee;
-      padding: 10px;
-      border-radius: 6px;
-    }
-    #status {
-      margin-top: 20px;
-      font-weight: bold;
-      font-size: 16px;
-      padding: 10px;
-      border-radius: 6px;
-      display: inline-block;
-    }
-    #status.pending {
-      color: #d48806;
-      background: #fff7e6;
-    }
-    #status.approved {
-      color: #389e0d;
-      background: #f6ffed;
-    }
-    #status.rejected {
-      color: #cf1322;
-      background: #fff1f0;
-    }
-    #copiar {
-      margin-top: 10px;
-      display: none;
-      background: #28a745;
-    }
-    #copiar.copiado {
-      background: #218838;
-    }
-    #vipNotice {
-      margin-top: 20px;
-      padding: 12px;
-      background: #fffbe6;
-      border: 1px solid #ffe58f;
-      border-radius: 8px;
-      display: none;
-      font-weight: bold;
-      color: #d48806;
-    }
+    body { font-family: Arial, sans-serif; max-width: 400px; margin: 40px auto; text-align: center; }
+    input, button { padding: 10px; margin: 10px; width: 90%; }
+    #qr img { margin-top: 20px; max-width: 300px; }
+    #pixCode { margin-top: 10px; word-wrap: break-word; font-size: 14px; color: #333; }
   </style>
 </head>
 <body>
-  <h1>Gerar PIX Produção</h1>
+  <h1>Gerar PIX Sandbox</h1>
 
-  <input type="number" id="amount" placeholder="Valor (R$)" step="0.01" min="1" />
-  <button onclick="gerarPix()">Gerar QR Code PIX</button>
-
-  <div id="vipNotice">Você atingiu o limite de agendamentos gratuitos! Faça upgrade VIP para agendar mais.</div>
+  <input type="number" id="amount" placeholder="Valor (R$)" step="0.01" />
+  <button onclick="gerarPix()">Gerar QR</button>
 
   <div id="qr"></div>
   <p id="pixCode"></p>
-  <p id="status"></p>
-  <button id="copiar" onclick="copiarPix()">Copiar Código PIX</button>
+  <button id="copiar" style="display:none;" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
-  const backendURL = "https://agendamento-xyld.onrender.com";
-  const cliente = "cliente1"; // definir cliente correto
-  const customerEmail = "amorimmm60@gmail.com"; // email do usuário (ou derivar do login)
-  let currentPaymentId = null;
-  let statusInterval = null;
-  let canSchedule = true;
+    const sandboxEmail = "UsuárioTESTUSER8572145168866911034@testuser.com";
 
-  async function agendar(dataAgendamento) {
-    if (!canSchedule) {
-      alert("Você precisa pagar o VIP para agendar mais.");
-      return gerarPix();
-    }
+    async function gerarPix() {
+      const amount = document.getElementById("amount").value;
+      if (!amount) return alert("Digite um valor!");
 
-    try {
-      const res = await fetch(`${backendURL}/agendar/${cliente}`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Authorization": "Bearer " + localStorage.getItem("token") 
-        },
-        body: JSON.stringify(dataAgendamento)
-      });
+      try {
+        const res = await fetch("/create-pix", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            amount, 
+            description: "Teste VIP", 
+            email: sandboxEmail 
+          })
+        });
 
-      const result = await res.json();
-      if (!res.ok) {
-        if (result.msg && result.msg.includes("Limite de 3 agendamentos")) {
-          document.getElementById("vipNotice").style.display = "block";
-          canSchedule = false;
-          return gerarPix();
+        const data = await res.json();
+
+        if (data.error) {
+          alert("Erro: " + data.error);
+          return;
         }
-        return alert(result.msg || "Erro ao agendar");
+
+        // Exibe o QR code
+        document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" />`;
+
+        // Mostra o código PIX copia-e-cola
+        document.getElementById("pixCode").innerText = data.qr_code;
+
+        // Mostra botão de copiar
+        document.getElementById("copiar").style.display = "inline-block";
+        window.qrString = data.qr_code;
+      } catch (err) {
+        alert("Erro ao gerar PIX: " + err.message);
       }
-
-      alert("Agendamento realizado com sucesso!");
-    } catch (err) {
-      alert("Erro ao agendar: " + err.message);
     }
-  }
 
-  async function gerarPix() {
-    const amount = parseFloat(document.getElementById("amount").value) || 0.01;
-    try {
-      const res = await fetch(`${backendURL}/create-pix`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": "Bearer " + localStorage.getItem("token")
-        },
-        body: JSON.stringify({ amount, description: "Pagamento VIP", email: customerEmail })
-      });
-
-      const data = await res.json();
-      if (data.error) return alert("Erro: " + data.error);
-
-      currentPaymentId = data.id;
-      document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" alt="QR Code PIX"/>`;
-      document.getElementById("pixCode").innerText = data.qr_code;
-      document.getElementById("copiar").style.display = "inline-block";
-
-      if (statusInterval) clearInterval(statusInterval);
-      setStatus("pending", "Aguardando pagamento... ⏳");
-
-      statusInterval = setInterval(checkStatus, 4000);
-    } catch (err) {
-      alert("Erro ao gerar PIX: " + err.message);
+    function copiarPix() {
+      navigator.clipboard.writeText(window.qrString)
+        .then(() => alert("Código PIX copiado!"))
+        .catch(() => alert("Falha ao copiar."));
     }
-  }
-
-  async function checkStatus() {
-    if (!currentPaymentId) return;
-
-    try {
-      const res = await fetch(`${backendURL}/status-pix/${currentPaymentId}`, {
-        headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
-      });
-      const data = await res.json();
-
-      if (data.status === "approved" || data.status === "paid") {
-        setStatus("approved", "Pagamento aprovado ✅");
-        clearInterval(statusInterval);
-        canSchedule = true;
-        document.getElementById("vipNotice").style.display = "none";
-        alert("VIP ativo! Você pode continuar agendando.");
-      } else if (data.status === "rejected") {
-        setStatus("rejected", "Pagamento recusado ❌");
-        clearInterval(statusInterval);
-      } else {
-        setStatus("pending", "Aguardando pagamento... ⏳");
-      }
-    } catch (err) {
-      console.error("Erro ao checar status:", err);
-    }
-  }
-
-  function setStatus(className, text) {
-    const statusEl = document.getElementById("status");
-    statusEl.className = className || "";
-    statusEl.innerText = text || "";
-  }
-
-  function copiarPix() {
-    const button = document.getElementById("copiar");
-    navigator.clipboard.writeText(document.getElementById("pixCode").innerText)
-      .then(() => {
-        button.innerText = "Copiado! ✅";
-        button.classList.add("copiado");
-        setTimeout(() => {
-          button.innerText = "Copiar Código PIX";
-          button.classList.remove("copiado");
-        }, 2000);
-      })
-      .catch(() => alert("Falha ao copiar."));
-  }
-</script>
+  </script>
 </body>
 </html>
-
-
