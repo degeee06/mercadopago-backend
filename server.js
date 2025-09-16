@@ -4,7 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import mercadopago from "mercadopago";
-
+import dotenv from "dotenv";
+dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 
