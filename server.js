@@ -5,9 +5,13 @@ import { fileURLToPath } from "url";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import { createClient } from "@supabase/supabase-js";
 import mercadopago from "mercadopago";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+
+// ---------------- Config MercadoPago ----------------
 mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
+
 // ---------------- Supabase ----------------
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -48,6 +52,29 @@ async function authMiddleware(req, res, next) {
   req.clienteId = data.user.user_metadata.cliente_id;
   if (!req.clienteId) return res.status(403).json({ msg: "Usuário sem cliente_id" });
   next();
+}
+
+// ---------------- Middleware VIP ----------------
+async function planoMiddleware(req, res, next) {
+  const email = req.user.email;
+  if (!email) return res.status(400).json({ msg: "Usuário sem email" });
+
+  try {
+    const { data: pagamento, error } = await supabase
+      .from("pagamentos")
+      .select("*")
+      .eq("email", email)
+      .eq("status", "approved")
+      .gte("valid_until", new Date())
+      .single();
+
+    req.isVIP = !!pagamento;
+    next();
+  } catch (err) {
+    console.error("Erro ao checar VIP:", err);
+    req.isVIP = false;
+    next();
+  }
 }
 
 // ---------------- Google Sheets ----------------
@@ -118,8 +145,8 @@ app.post("/webhook/mercadopago", async (req, res) => {
   }
 });
 
-// ---------------- Agendar com limite para free e pagamento teste ----------------
-app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
+// ---------------- Agendar ----------------
+app.post("/agendar/:cliente", authMiddleware, planoMiddleware, async (req, res) => {
   try {
     const cliente = req.params.cliente;
     if (req.clienteId !== cliente) return res.status(403).json({ msg: "Acesso negado" });
@@ -128,19 +155,8 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
     if (!Nome || !Email || !Telefone || !Data || !Horario)
       return res.status(400).json({ msg: "Todos os campos obrigatórios" });
 
-    // Verifica pagamento ativo
-    const { data: pagamento } = await supabase
-      .from("pagamentos")
-      .select("*")
-      .eq("email", Email)
-      .eq("status", "approved")
-      .gte("valid_until", new Date())
-      .single();
-
-    const isPremium = !!pagamento;
-
     // Limite para free
-    if (!isPremium) {
+    if (!req.isVIP) {
       const { data: agendamentosHoje } = await supabase
         .from("agendamentos")
         .select("*")
@@ -176,8 +192,8 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
         telefone: Telefone,
         data: Data,
         horario: Horario,
-        status: isPremium ? "confirmado" : "pendente",
-        confirmado: isPremium
+        status: req.isVIP ? "confirmado" : "pendente",
+        confirmado: req.isVIP
       }])
       .select()
       .single();
@@ -185,14 +201,12 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
     if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
 
     // ---------------- Pagamento teste MercadoPago ----------------
-    if (!isPremium) {
+    if (!req.isVIP) {
       const pagamentoMP = await mercadopago.payment.create({
-        transaction_amount: 0.01, // valor de teste
+        transaction_amount: 0.01,
         description: `Agendamento ${data.id} - ${Nome}`,
-        payment_method_id: "pix", // ou "bolbradesco", "card", etc.
-        payer: {
-          email: Email
-        }
+        payment_method_id: "pix",
+        payer: { email: Email }
       });
 
       await supabase
@@ -218,6 +232,7 @@ app.post("/agendar/:cliente", authMiddleware, async (req, res) => {
     res.status(500).json({ msg: "Erro interno" });
   }
 });
+
 
 
 // ---------------- Confirmar ----------------
@@ -315,7 +330,6 @@ app.post("/reagendar/:cliente/:id", authMiddleware, async (req, res) => {
 
     if (errorGet || !agendamento) return res.status(404).json({ msg: "Agendamento não encontrado" });
 
-    // Checa se novo horário está livre
     const livre = await horarioDisponivel(cliente, novaData, novoHorario, id);
     if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
 
