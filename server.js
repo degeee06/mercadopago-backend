@@ -9,6 +9,20 @@ import mercadopago from "mercadopago";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 
+// ---------------- Validar ENV ----------------
+const requiredEnv = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "GOOGLE_SERVICE_ACCOUNT",
+  "MP_ACCESS_TOKEN"
+];
+for (const key of requiredEnv) {
+  if (!process.env[key]) {
+    console.error(`❌ ERRO: Variável de ambiente ${key} não foi definida`);
+    process.exit(1);
+  }
+}
+
 // ---------------- Config MercadoPago ----------------
 mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
 
@@ -30,7 +44,7 @@ let creds;
 try {
   creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 } catch (e) {
-  console.error("Erro ao parsear GOOGLE_SERVICE_ACCOUNT:", e);
+  console.error("❌ ERRO ao parsear GOOGLE_SERVICE_ACCOUNT:", e.message);
   process.exit(1);
 }
 
@@ -46,7 +60,6 @@ async function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ msg: "Token não enviado" });
 
   try {
-    // Decodifica token usando a service role key
     const { data: user, error } = await supabase.auth.getUser(token);
     if (error || !user.user) return res.status(401).json({ msg: "Token inválido" });
 
