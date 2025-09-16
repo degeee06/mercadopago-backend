@@ -1,85 +1,49 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
-import mercadopago from "mercadopago";
+import dotenv from "dotenv";
+import { MercadoPagoConfig, Payment } from "mercadopago";
+
+dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// 🔑 Token vem do ENV (Render/Railway)
-mercadopago.configure({
-  access_token: process.env.MP_ACCESS_TOKEN,
+// 🔑 Configuração Mercado Pago
+const client = new MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN, // define no Render
 });
 
-// 👉 Criar pagamento PIX
+// 🔎 Teste
+app.get("/", (req, res) => {
+  res.json({ message: "Servidor MercadoPago OK 🚀" });
+});
+
+// 📌 Criar pagamento PIX
 app.post("/create-payment", async (req, res) => {
   try {
-    const { email, amount } = req.body;
+    const payment = new Payment(client);
 
-    const payment_data = {
-      transaction_amount: parseFloat(amount),
-      description: "Compra de VIP",
+    const body = {
+      transaction_amount: Number(req.body.amount),
+      description: "VIP Meloplay",
       payment_method_id: "pix",
       payer: {
-        email,
+        email: req.body.email,
       },
     };
 
-    const payment = await mercadopago.payment.create(payment_data);
-
-    const qrCodeBase64 =
-      payment.body.point_of_interaction?.transaction_data?.qr_code_base64 || "";
-    const pixCode =
-      payment.body.point_of_interaction?.transaction_data?.qr_code || "";
-
-    return res.json({
-      id: payment.body.id,
-      status: payment.body.status,
-      qrImageBase64: qrCodeBase64,
-      pixCode,
-    });
+    const result = await payment.create({ body });
+    res.json(result);
   } catch (error) {
-    console.error("Erro ao criar pagamento:", error);
-    return res
-      .status(500)
-      .json({ error: "Erro ao criar pagamento", details: error.message });
+    console.error("Erro criar pagamento:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// 👉 Verificar status do pagamento por email
-app.get("/check-vip", async (req, res) => {
-  try {
-    const { email } = req.query;
-
-    const search = await mercadopago.payment.search({
-      qs: {
-        limit: 5,
-        offset: 0,
-        sort: "date_created",
-        criteria: "desc",
-        external_reference: email,
-      },
-    });
-
-    const payments = search.body.results || [];
-    const lastPayment = payments[0];
-
-    if (lastPayment && lastPayment.status === "approved") {
-      return res.json({ vip: true });
-    } else {
-      return res.json({ vip: false });
-    }
-  } catch (error) {
-    console.error("Erro ao verificar VIP:", error);
-    return res
-      .status(500)
-      .json({ error: "Erro ao verificar VIP", details: error.message });
-  }
-});
-
+// ▶️ Start
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
