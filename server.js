@@ -5,12 +5,17 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
 // Inicializa Mercado Pago (SDK atual)
 const { MercadoPagoConfig, Payment } = mercadopago;
-const mp = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
+
+const mp = new MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN
+});
+
 const payment = new Payment(mp);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,23 +27,22 @@ app.use(express.static(path.join(__dirname, "public")));
 // Endpoint PIX
 app.post("/create-pix", async (req, res) => {
   const { amount, description, email } = req.body;
+
   try {
     const result = await payment.create({
       body: {
         transaction_amount: Number(amount),
         description: description || "Pagamento PIX",
         payment_method_id: "pix",
-        payer: {
-          email: email || "teste@cliente.com",
-        },
-      },
+        payer: { email: email || "teste@cliente.com" }
+      }
     });
 
     res.json({
       id: result.id,
       status: result.status,
       qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
+      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
