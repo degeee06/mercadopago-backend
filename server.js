@@ -122,6 +122,51 @@ app.get("/:cliente", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+
+// ---------------- Criar PIX ----------------
+app.post("/create-pix", authMiddleware, async (req, res) => {
+  try {
+    const { amount, description, email } = req.body;
+
+    if (!amount || !email) return res.status(400).json({ error: "amount e email obrigatórios" });
+
+    // Cria pagamento MercadoPago
+    const pagamento = await mercadopago.payment.create({
+      transaction_amount: amount,
+      description: description || "Pagamento VIP",
+      payment_method_id: "pix",
+      payer: { email }
+    });
+
+    res.json({
+      id: pagamento.body.id,
+      qr_code: pagamento.body.point_of_interaction.transaction_data.qr_code,
+      qr_code_base64: pagamento.body.point_of_interaction.transaction_data.qr_code_base64,
+      status: pagamento.body.status
+    });
+  } catch (err) {
+    console.error("Erro create-pix:", err);
+    res.status(500).json({ error: "Erro ao criar PIX" });
+  }
+});
+
+// ---------------- Status PIX ----------------
+app.get("/status-pix/:id", authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "ID do pagamento obrigatório" });
+
+    const pagamento = await mercadopago.payment.get(id);
+    res.json({ status: pagamento.body.status });
+  } catch (err) {
+    console.error("Erro status-pix:", err);
+    res.status(500).json({ error: "Erro ao consultar status PIX" });
+  }
+});
+
+
+
+
 // ---------------- Webhook MercadoPago ----------------
 app.post("/webhook/mercadopago", async (req, res) => {
   try {
