@@ -102,122 +102,121 @@
   <button id="copiar" onclick="copiarPix()">Copiar Código PIX</button>
 
   <script>
-    const backendURL = "https://agendamento-xyld.onrender.com";
-    const emailsPorCliente = {
-    cliente1: "amorimmm60@gmail.com",
-    cliente2: "cliente2@email.com",
-    cliente3: "cliente3@email.com"
-  };
+  const backendURL = "https://agendamento-xyld.onrender.com";
+  const cliente = "cliente1"; // definir cliente correto
+  const customerEmail = "amorimmm60@gmail.com"; // email do usuário (ou derivar do login)
+  let currentPaymentId = null;
+  let statusInterval = null;
+  let canSchedule = true;
 
-    const customerEmail = emailsPorCliente[cliente] || "amorimmm60@gmail.com";
-
-    let currentPaymentId = null;
-    let statusInterval = null;
-    let canSchedule = true;
-
-    async function agendar(dataAgendamento) {
-      if (!canSchedule) {
-        alert("Você precisa pagar o VIP para agendar mais.");
-        return gerarPix(); // abre PIX automaticamente
-      }
-
-      try {
-        const res = await fetch(`${backendURL}/agendar/cliente1`, {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json", 
-            "Authorization": "Bearer " + localStorage.getItem("token") 
-          },
-          body: JSON.stringify(dataAgendamento)
-        });
-
-        const result = await res.json();
-        if (!res.ok) {
-          if (result.msg && result.msg.includes("Limite de 3 agendamentos")) {
-            // Mostra aviso VIP e abre PIX automaticamente
-            document.getElementById("vipNotice").style.display = "block";
-            canSchedule = false;
-            return gerarPix();
-          }
-          return alert(result.msg || "Erro ao agendar");
-        }
-
-        alert("Agendamento realizado com sucesso!");
-      } catch (err) {
-        alert("Erro ao agendar: " + err.message);
-      }
+  async function agendar(dataAgendamento) {
+    if (!canSchedule) {
+      alert("Você precisa pagar o VIP para agendar mais.");
+      return gerarPix();
     }
 
-    async function gerarPix() {
-      const amount = parseFloat(document.getElementById("amount").value) || 0.01;
-      try {
-        const res = await fetch(`${backendURL}/create-pix`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ amount, description: "Pagamento VIP", email: customerEmail })
-        });
+    try {
+      const res = await fetch(`${backendURL}/agendar/${cliente}`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "Authorization": "Bearer " + localStorage.getItem("token") 
+        },
+        body: JSON.stringify(dataAgendamento)
+      });
 
-        const data = await res.json();
-        if (data.error) return alert("Erro: " + data.error);
+      const result = await res.json();
+      if (!res.ok) {
+        if (result.msg && result.msg.includes("Limite de 3 agendamentos")) {
+          document.getElementById("vipNotice").style.display = "block";
+          canSchedule = false;
+          return gerarPix();
+        }
+        return alert(result.msg || "Erro ao agendar");
+      }
 
-        currentPaymentId = data.id;
-        document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" alt="QR Code PIX"/>`;
-        document.getElementById("pixCode").innerText = data.qr_code;
-        document.getElementById("copiar").style.display = "inline-block";
+      alert("Agendamento realizado com sucesso!");
+    } catch (err) {
+      alert("Erro ao agendar: " + err.message);
+    }
+  }
 
-        if (statusInterval) clearInterval(statusInterval);
+  async function gerarPix() {
+    const amount = parseFloat(document.getElementById("amount").value) || 0.01;
+    try {
+      const res = await fetch(`${backendURL}/create-pix`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + localStorage.getItem("token")
+        },
+        body: JSON.stringify({ amount, description: "Pagamento VIP", email: customerEmail })
+      });
+
+      const data = await res.json();
+      if (data.error) return alert("Erro: " + data.error);
+
+      currentPaymentId = data.id;
+      document.getElementById("qr").innerHTML = `<img src="data:image/png;base64,${data.qr_code_base64}" alt="QR Code PIX"/>`;
+      document.getElementById("pixCode").innerText = data.qr_code;
+      document.getElementById("copiar").style.display = "inline-block";
+
+      if (statusInterval) clearInterval(statusInterval);
+      setStatus("pending", "Aguardando pagamento... ⏳");
+
+      statusInterval = setInterval(checkStatus, 4000);
+    } catch (err) {
+      alert("Erro ao gerar PIX: " + err.message);
+    }
+  }
+
+  async function checkStatus() {
+    if (!currentPaymentId) return;
+
+    try {
+      const res = await fetch(`${backendURL}/status-pix/${currentPaymentId}`, {
+        headers: { "Authorization": "Bearer " + localStorage.getItem("token") }
+      });
+      const data = await res.json();
+
+      if (data.status === "approved" || data.status === "paid") {
+        setStatus("approved", "Pagamento aprovado ✅");
+        clearInterval(statusInterval);
+        canSchedule = true;
+        document.getElementById("vipNotice").style.display = "none";
+        alert("VIP ativo! Você pode continuar agendando.");
+      } else if (data.status === "rejected") {
+        setStatus("rejected", "Pagamento recusado ❌");
+        clearInterval(statusInterval);
+      } else {
         setStatus("pending", "Aguardando pagamento... ⏳");
-
-        statusInterval = setInterval(checkStatus, 4000);
-      } catch (err) {
-        alert("Erro ao gerar PIX: " + err.message);
       }
+    } catch (err) {
+      console.error("Erro ao checar status:", err);
     }
+  }
 
-    async function checkStatus() {
-      if (!currentPaymentId) return;
+  function setStatus(className, text) {
+    const statusEl = document.getElementById("status");
+    statusEl.className = className || "";
+    statusEl.innerText = text || "";
+  }
 
-      try {
-        const res = await fetch(`${backendURL}/status-pix/${currentPaymentId}`);
-        const data = await res.json();
-
-        if (data.status === "approved" || data.status === "paid") {
-          setStatus("approved", "Pagamento aprovado ✅");
-          clearInterval(statusInterval);
-          canSchedule = true; // agora o usuário pode agendar novamente
-          document.getElementById("vipNotice").style.display = "none";
-          alert("VIP ativo! Você pode continuar agendando.");
-        } else if (data.status === "rejected") {
-          setStatus("rejected", "Pagamento recusado ❌");
-          clearInterval(statusInterval);
-        } else {
-          setStatus("pending", "Aguardando pagamento... ⏳");
-        }
-      } catch (err) {
-        console.error("Erro ao checar status:", err);
-      }
-    }
-
-    function setStatus(className, text) {
-      const statusEl = document.getElementById("status");
-      statusEl.className = className || "";
-      statusEl.innerText = text || "";
-    }
-
-    function copiarPix() {
-      const button = document.getElementById("copiar");
-      navigator.clipboard.writeText(document.getElementById("pixCode").innerText)
-        .then(() => {
-          button.innerText = "Copiado! ✅";
-          button.classList.add("copiado");
-          setTimeout(() => {
-            button.innerText = "Copiar Código PIX";
-            button.classList.remove("copiado");
-          }, 2000);
-        })
-        .catch(() => alert("Falha ao copiar."));
-    }
-  </script>
+  function copiarPix() {
+    const button = document.getElementById("copiar");
+    navigator.clipboard.writeText(document.getElementById("pixCode").innerText)
+      .then(() => {
+        button.innerText = "Copiado! ✅";
+        button.classList.add("copiado");
+        setTimeout(() => {
+          button.innerText = "Copiar Código PIX";
+          button.classList.remove("copiado");
+        }, 2000);
+      })
+      .catch(() => alert("Falha ao copiar."));
+  }
+</script>
 </body>
 </html>
+
 
