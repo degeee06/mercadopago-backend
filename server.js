@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
-import mercadopago from "mercadopago"; // ❌ sem {MercadoPago}
+import mercadopago from "mercadopago";
 import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
@@ -11,11 +11,16 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// 🔑 Configura token Mercado Pago
-mercadopago.configurations.setAccessToken(process.env.MERCADOPAGO_ACCESS_TOKEN);
+// Configuração correta do token Mercado Pago 2.8.0
+mercadopago.configurations = {
+  access_token: process.env.MERCADOPAGO_ACCESS_TOKEN,
+};
 
-// 🔑 Configura Supabase com sua tabela pagamentos
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Supabase
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // Rota teste
 app.get("/", (req, res) => res.send("Servidor MercadoPago + Supabase rodando 🚀"));
@@ -44,13 +49,13 @@ app.post("/create_preference", async (req, res) => {
 
     const result = await mercadopago.preferences.create(preference);
 
-    // Insere no Supabase respeitando sua tabela
+    // Insere no Supabase respeitando sua tabela pagamentos
     await supabase.from("pagamentos").insert([
       {
         id: result.body.id,
         email,
         amount: price * quantity,
-        status: "pending",   // created_at é automático
+        status: "pending",
         valid_until: null,
       },
     ]);
@@ -76,7 +81,7 @@ app.post("/webhook", async (req, res) => {
 
       let updates = { status };
 
-      // Se aprovado, define validade do VIP (+30 dias)
+      // Se aprovado, define validade VIP (+30 dias)
       if (status === "approved") {
         const now = new Date();
         const validUntil = new Date(now.setDate(now.getDate() + 30));
