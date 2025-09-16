@@ -11,16 +11,21 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Configuração correta do token Mercado Pago 2.8.0
+// Configuração Mercado Pago 2.8.0
 mercadopago.configurations = {
-  access_token: process.env.MERCADOPAGO_ACCESS_TOKEN,
+  access_token: process.env.MP_ACCESS_TOKEN, // seu env
 };
 
 // Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY; // seu env
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("❌ Variáveis de ambiente Supabase não configuradas corretamente!");
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Rota teste
 app.get("/", (req, res) => res.send("Servidor MercadoPago + Supabase rodando 🚀"));
