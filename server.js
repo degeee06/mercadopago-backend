@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import dotenv from "dotenv";
-import MercadoPago from "mercadopago";
+import mercadopago from "mercadopago"; // ❌ sem {MercadoPago}
 import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
@@ -11,10 +11,10 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Inicializa Mercado Pago
-const client = new MercadoPago({ accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN });
+// 🔑 Configura token Mercado Pago
+mercadopago.configurations.setAccessToken(process.env.MERCADOPAGO_ACCESS_TOKEN);
 
-// Inicializa Supabase
+// 🔑 Configura Supabase com sua tabela pagamentos
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 // Rota teste
@@ -42,20 +42,20 @@ app.post("/create_preference", async (req, res) => {
       auto_return: "approved",
     };
 
-    // Cria preferência no Mercado Pago
-    const result = await client.preferences.create(preference);
+    const result = await mercadopago.preferences.create(preference);
 
-    // Insere no Supabase como pending
+    // Insere no Supabase respeitando sua tabela
     await supabase.from("pagamentos").insert([
       {
-        id: result.id,
+        id: result.body.id,
         email,
         amount: price * quantity,
-        status: "pending",
+        status: "pending",   // created_at é automático
+        valid_until: null,
       },
     ]);
 
-    res.json({ id: result.id, init_point: result.init_point });
+    res.json({ id: result.body.id, init_point: result.body.init_point });
   } catch (error) {
     console.error("Erro ao criar preferência:", error);
     res.status(500).json({ error: error.message });
@@ -69,14 +69,14 @@ app.post("/webhook", async (req, res) => {
 
     if (data.type === "payment") {
       const paymentId = data.data.id;
-      const payment = await client.payment.findById(paymentId);
+      const payment = await mercadopago.payment.findById(paymentId);
 
-      const status = payment.status;
-      const id = payment.order.id;
+      const status = payment.body.status;
+      const id = payment.body.order.id;
 
       let updates = { status };
 
-      // Se aprovado, define validade VIP (+30 dias)
+      // Se aprovado, define validade do VIP (+30 dias)
       if (status === "approved") {
         const now = new Date();
         const validUntil = new Date(now.setDate(now.getDate() + 30));
