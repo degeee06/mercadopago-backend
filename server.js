@@ -15,7 +15,7 @@ mercadopago.configurations.setAccessToken(process.env.MP_ACCESS_TOKEN);
 // ---------------- Supabase ----------------
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY // Use a service role key para backend seguro
 );
 
 // ---------------- Clientes e planilhas ----------------
@@ -45,13 +45,19 @@ async function authMiddleware(req, res, next) {
   const token = req.headers["authorization"]?.split("Bearer ")[1];
   if (!token) return res.status(401).json({ msg: "Token não enviado" });
 
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return res.status(401).json({ msg: "Token inválido" });
+  try {
+    // Decodifica token usando a service role key
+    const { data: user, error } = await supabase.auth.getUser(token);
+    if (error || !user.user) return res.status(401).json({ msg: "Token inválido" });
 
-  req.user = data.user;
-  req.clienteId = data.user.user_metadata.cliente_id;
-  if (!req.clienteId) return res.status(403).json({ msg: "Usuário sem cliente_id" });
-  next();
+    req.user = user.user;
+    req.clienteId = user.user.user_metadata.cliente_id;
+    if (!req.clienteId) return res.status(403).json({ msg: "Usuário sem cliente_id" });
+    next();
+  } catch (err) {
+    console.error("Erro authMiddleware:", err);
+    res.status(500).json({ msg: "Erro interno" });
+  }
 }
 
 // ---------------- Middleware VIP ----------------
@@ -60,7 +66,7 @@ async function planoMiddleware(req, res, next) {
   if (!email) return res.status(400).json({ msg: "Usuário sem email" });
 
   try {
-    const { data: pagamento, error } = await supabase
+    const { data: pagamento } = await supabase
       .from("pagamentos")
       .select("*")
       .eq("email", email)
@@ -113,6 +119,11 @@ async function horarioDisponivel(cliente, data, horario, ignoreId = null) {
   return agendamentos.length === 0;
 }
 
+// ---------------- Limpar duplicados antigos ----------------
+async function limparDuplicados(cliente, data, horario) {
+  await supabase.rpc("remover_agendamentos_duplicados", { cliente, data, horario });
+}
+
 // ---------------- Rotas ----------------
 app.get("/", (req, res) => res.send("Servidor rodando"));
 
@@ -120,74 +131,6 @@ app.get("/:cliente", (req, res) => {
   const cliente = req.params.cliente;
   if (!clientesValidos.includes(cliente)) return res.status(404).send("Cliente não encontrado");
   res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-
-// ---------------- Criar PIX ----------------
-app.post("/create-pix", authMiddleware, async (req, res) => {
-  try {
-    const { amount, description, email } = req.body;
-
-    if (!amount || !email) return res.status(400).json({ error: "amount e email obrigatórios" });
-
-    // Cria pagamento MercadoPago
-    const pagamento = await mercadopago.payment.create({
-      transaction_amount: amount,
-      description: description || "Pagamento VIP",
-      payment_method_id: "pix",
-      payer: { email }
-    });
-
-    res.json({
-      id: pagamento.body.id,
-      qr_code: pagamento.body.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: pagamento.body.point_of_interaction.transaction_data.qr_code_base64,
-      status: pagamento.body.status
-    });
-  } catch (err) {
-    console.error("Erro create-pix:", err);
-    res.status(500).json({ error: "Erro ao criar PIX" });
-  }
-});
-
-// ---------------- Status PIX ----------------
-app.get("/status-pix/:id", authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!id) return res.status(400).json({ error: "ID do pagamento obrigatório" });
-
-    const pagamento = await mercadopago.payment.get(id);
-    res.json({ status: pagamento.body.status });
-  } catch (err) {
-    console.error("Erro status-pix:", err);
-    res.status(500).json({ error: "Erro ao consultar status PIX" });
-  }
-});
-
-
-
-
-// ---------------- Webhook MercadoPago ----------------
-app.post("/webhook/mercadopago", async (req, res) => {
-  try {
-    const payment = req.body;
-    const { email, status } = payment;
-
-    await supabase
-      .from("pagamentos")
-      .upsert([{
-        id: payment.id,
-        email,
-        amount: payment.transaction_amount,
-        status,
-        valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000) // válido por 1 dia
-      }]);
-
-    res.status(200).send("OK");
-  } catch (err) {
-    console.error("Erro webhook MP:", err);
-    res.status(500).send("Erro interno");
-  }
 });
 
 // ---------------- Agendar ----------------
@@ -218,15 +161,6 @@ app.post("/agendar/:cliente", authMiddleware, planoMiddleware, async (req, res) 
     const livre = await horarioDisponivel(cliente, Data, Horario);
     if (!livre) return res.status(400).json({ msg: "Horário indisponível" });
 
-    // Remove agendamento cancelado no mesmo horário
-    await supabase
-      .from("agendamentos")
-      .delete()
-      .eq("cliente", cliente)
-      .eq("data", Data)
-      .eq("horario", Horario)
-      .eq("status", "cancelado");
-
     // Insere novo agendamento
     const { data, error } = await supabase
       .from("agendamentos")
@@ -245,26 +179,6 @@ app.post("/agendar/:cliente", authMiddleware, planoMiddleware, async (req, res) 
 
     if (error) return res.status(500).json({ msg: "Erro ao salvar no Supabase" });
 
-    // ---------------- Pagamento teste MercadoPago ----------------
-    if (!req.isVIP) {
-      const pagamentoMP = await mercadopago.payment.create({
-        transaction_amount: 0.01,
-        description: `Agendamento ${data.id} - ${Nome}`,
-        payment_method_id: "pix",
-        payer: { email: Email }
-      });
-
-      await supabase
-        .from("pagamentos")
-        .upsert([{
-          id: pagamentoMP.body.id,
-          email: Email,
-          amount: pagamentoMP.body.transaction_amount,
-          status: pagamentoMP.body.status,
-          valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        }]);
-    }
-
     // Salva no Google Sheets
     const doc = await accessSpreadsheet(cliente);
     const sheet = doc.sheetsByIndex[0];
@@ -277,6 +191,7 @@ app.post("/agendar/:cliente", authMiddleware, planoMiddleware, async (req, res) 
     res.status(500).json({ msg: "Erro interno" });
   }
 });
+
 
 
 
