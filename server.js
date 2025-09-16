@@ -1,55 +1,73 @@
 import express from "express";
 import cors from "cors";
-import mercadopago from "mercadopago";
-import path from "path";
-import { fileURLToPath } from "url";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Inicializa Mercado Pago (SDK atual)
-const { MercadoPagoConfig, Payment } = mercadopago;
-const mp = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN
-});
-const payment = new Payment(mp);
+// ======= Banco em memória (simples) =======
+const vipUsers = {}; 
+// Estrutura: { "email@example.com": { vip: true, valid_until: "2025-10-10T00:00:00.000Z" } }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Serve a pasta public da raiz do projeto
-app.use(express.static(path.join(__dirname, "public")));
-
-// Endpoint PIX
-app.post("/create-pix", async (req, res) => {
-  const { amount, description, email } = req.body;
+// ======= Endpoint para compra de VIP =======
+app.post("/purchase-vip", async (req, res) => {
   try {
-    const result = await payment.create({
-      body: {
-        transaction_amount: Number(amount),
-        description: description || "Pagamento PIX",
-        payment_method_id: "pix",
-        payer: { email: email || "teste@cliente.com" }
-      }
-    });
+    const { email, amount } = req.body;
 
-    res.json({
-      id: result.id,
-      status: result.status,
-      qr_code: result.point_of_interaction.transaction_data.qr_code,
-      qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64
+    if (!email) {
+      return res.status(400).json({ error: "Email obrigatório" });
+    }
+
+    // Aqui seria chamada à API do MercadoPago
+    // Para teste, vamos apenas marcar o usuário como VIP por 30 dias
+    const now = new Date();
+    const validUntil = new Date(now.setDate(now.getDate() + 30));
+
+    vipUsers[email] = {
+      vip: true,
+      valid_until: validUntil.toISOString(),
+    };
+
+    return res.json({
+      message: "VIP ativado com sucesso",
+      email,
+      valid_until: validUntil,
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    console.error("Erro no /purchase-vip:", e);
+    res.status(500).json({ error: "Erro ao processar compra de VIP" });
   }
 });
 
-// Serve o index.html
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public/index.html"));
+// ======= Endpoint para verificar VIP =======
+app.get("/check-vip/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const data = vipUsers[email];
+
+    if (!data) {
+      return res.json({ vip: false });
+    }
+
+    const validUntil = new Date(data.valid_until);
+    const now = new Date();
+
+    if (validUntil > now) {
+      return res.json({ vip: true, valid_until: data.valid_until });
+    } else {
+      // Se expirou, remove
+      delete vipUsers[email];
+      return res.json({ vip: false });
+    }
+  } catch (e) {
+    console.error("Erro no /check-vip:", e);
+    res.status(500).json({ error: "Erro ao checar VIP" });
+  }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Servidor rodando!");
+// ======= Start =======
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ Servidor rodando na porta ${PORT}`);
 });
