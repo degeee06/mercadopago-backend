@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import crypto from "crypto";
 import { MercadoPagoConfig, Payment } from "mercadopago";
 import { createClient } from "@supabase/supabase-js";
 
@@ -39,16 +38,14 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
-    // Salva no Supabase usando paymentId como chave
+    // Salva pagamento como pending
     await supabase.from("pagamentos").upsert(
-      [
-        { id: result.id, email, amount: Number(amount), status: "pending" }
-      ],
+      [{ id: result.id, email, amount: Number(amount), status: "pending" }],
       { onConflict: ["id"] }
     );
 
     res.json({
-      id: result.id,  // <- chave usada no Flutter
+      id: result.id,
       status: result.status,
       qr_code: result.point_of_interaction.transaction_data.qr_code,
       qr_code_base64: result.point_of_interaction.transaction_data.qr_code_base64,
@@ -67,7 +64,7 @@ app.get("/status-pix/:id", async (req, res) => {
   res.json({ status: data?.status || "pending" });
 });
 
-// Checa status VIP pelo email (compatível com API antiga do Flutter)
+// Checa status VIP pelo email
 app.get("/check-vip/:email", async (req, res) => {
   const email = req.params.email;
   if (!email) return res.status(400).json({ error: "Faltando email" });
@@ -91,9 +88,8 @@ app.get("/check-vip/:email", async (req, res) => {
   res.json({ vip });
 });
 
-
-// Webhook Mercado Pago (com log detalhado)
-app.post("/webhook", express.json(), async (req, res) => {
+// Webhook Mercado Pago
+app.post("/webhook", async (req, res) => {
   try {
     console.log("===== WEBHOOK RECEBIDO =====");
     console.log("Headers:", JSON.stringify(req.headers, null, 2));
@@ -103,7 +99,7 @@ app.post("/webhook", express.json(), async (req, res) => {
 
     const paymentId = req.body?.data?.id || req.query["data.id"];
     if (!paymentId) {
-      console.log("❌ Webhook sem paymentId, body:", req.body);
+      console.log("❌ Webhook sem paymentId:", req.body);
       return res.sendStatus(400);
     }
 
@@ -124,7 +120,7 @@ app.post("/webhook", express.json(), async (req, res) => {
       console.log(`✅ Supabase atualizado: ${paymentId} -> ${paymentDetails.status}`);
     }
 
-    // Se pago/aprovado, ativa VIP
+    // Se pago/aprovado, ativa ou renova VIP por 30 dias
     if (["approved", "paid"].includes(paymentDetails.status.toLowerCase())) {
       const email = paymentDetails.payer.email;
       const vipExpiresAt = new Date();
@@ -138,7 +134,7 @@ app.post("/webhook", express.json(), async (req, res) => {
       if (vipError) {
         console.error("❌ Erro ao salvar VIP:", vipError.message);
       } else {
-        console.log(`🎉 VIP ativado para ${email} até ${vipExpiresAt}`);
+        console.log(`🎉 VIP ativado/renovado para ${email} até ${vipExpiresAt}`);
       }
     }
 
@@ -150,7 +146,7 @@ app.post("/webhook", express.json(), async (req, res) => {
 });
 
 // Inicia servidor
-const PORT = process.env.PORT || 10000; // Render usa a porta passada em process.env.PORT
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
