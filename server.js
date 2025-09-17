@@ -67,9 +67,9 @@ app.get("/status-pix/:id", async (req, res) => {
   res.json({ status: data?.status || "pending" });
 });
 
-// Checa status VIP pelo email (novo endpoint)
-app.get("/vip-status", async (req, res) => {
-  const email = req.query.email;
+// Checa status VIP pelo email (compatível com API antiga do Flutter)
+app.get("/check-vip/:email", async (req, res) => {
+  const email = req.params.email;
   if (!email) return res.status(400).json({ error: "Faltando email" });
 
   const { data, error } = await supabase
@@ -78,18 +78,19 @@ app.get("/vip-status", async (req, res) => {
     .eq("email", email)
     .single();
 
-  if (error && error.code !== "PGRST116") { // ignore not found
+  if (error && error.code !== "PGRST116") {
     return res.status(500).json({ error: error.message });
   }
 
   const now = new Date();
-  let isVip = false;
+  let vip = false;
   if (data && new Date(data.vip_expires_at) > now) {
-    isVip = true;
+    vip = true;
   }
 
-  res.json({ isVip });
+  res.json({ vip });
 });
+
 
 // Webhook Mercado Pago (corrigido)
 app.post("/webhook", express.json(), async (req, res) => {
