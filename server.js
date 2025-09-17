@@ -11,14 +11,14 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Configuração Mercado Pago 2.8.0
-mercadopago.configurations = {
-  access_token: process.env.MP_ACCESS_TOKEN, // seu env
-};
+// Configuração Mercado Pago (SDK 2.8.0)
+mercadopago.configure({
+  access_token: process.env.MP_ACCESS_TOKEN,
+});
 
 // Supabase
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY; // seu env
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error("❌ Variáveis de ambiente Supabase não configuradas corretamente!");
@@ -30,50 +30,48 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // Rota teste
 app.get("/", (req, res) => res.send("Servidor MercadoPago + Supabase rodando 🚀"));
 
-// Criar pagamento VIP
-app.post("/create_preference", async (req, res) => {
+// Criar pagamento PIX (igual à API Flutter que você mandou)
+app.post("/create-pix", async (req, res) => {
   try {
-    const { title, price, quantity, email } = req.body;
+    const { amount, email, description } = req.body;
 
-    const preference = {
-      items: [
-        {
-          title,
-          unit_price: Number(price),
-          quantity: Number(quantity),
-        },
-      ],
+    if (!amount || !email) {
+      return res.status(400).json({ error: "amount e email são obrigatórios" });
+    }
+
+    const paymentData = {
+      transaction_amount: Number(amount),
+      description: description || "Pagamento VIP",
+      payment_method_id: "pix",
       payer: { email },
-      back_urls: {
-        success: "https://seu-app.com/success",
-        failure: "https://seu-app.com/failure",
-        pending: "https://seu-app.com/pending",
-      },
-      auto_return: "approved",
     };
 
-    const result = await mercadopago.preferences.create(preference);
+    const result = await mercadopago.payment.create(paymentData);
 
-    // Insere no Supabase respeitando sua tabela pagamentos
+    // Insere pagamento no Supabase
     await supabase.from("pagamentos").insert([
       {
-        id: result.body.id,
+        id: result.body.id.toString(), // payment.id
         email,
-        amount: price * quantity,
-        status: "pending",
+        amount,
+        status: result.body.status,
         valid_until: null,
       },
     ]);
 
-    res.json({ id: result.body.id, init_point: result.body.init_point });
+    res.json({
+      id: result.body.id,
+      qrCode: result.body.point_of_interaction.transaction_data.qr_code,
+      qrImageBase64:
+        result.body.point_of_interaction.transaction_data.qr_code_base64,
+    });
   } catch (error) {
-    console.error("Erro ao criar preferência:", error);
+    console.error("Erro ao criar pagamento PIX:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-
-// rota de verificação VIP
+// Verifica status VIP
 app.get("/check-vip/:email", async (req, res) => {
   try {
     const { email } = req.params;
@@ -102,8 +100,6 @@ app.get("/check-vip/:email", async (req, res) => {
   }
 });
 
-
-
 // Webhook Mercado Pago
 app.post("/webhook", async (req, res) => {
   try {
@@ -114,11 +110,10 @@ app.post("/webhook", async (req, res) => {
       const payment = await mercadopago.payment.findById(paymentId);
 
       const status = payment.body.status;
-      const id = payment.body.order.id;
+      const id = payment.body.id; // sempre payment.id
 
       let updates = { status };
 
-      // Se aprovado, define validade VIP (+30 dias)
       if (status === "approved") {
         const now = new Date();
         const validUntil = new Date(now.setDate(now.getDate() + 30));
