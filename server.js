@@ -38,9 +38,9 @@ app.post("/create-pix", async (req, res) => {
       },
     });
 
-    // Salva pagamento como pending
+    // Salva pagamento como pending com valid_until nulo
     await supabase.from("pagamentos").upsert(
-      [{ id: result.id, email, amount: Number(amount), status: "pending" }],
+      [{ id: result.id, email, amount: Number(amount), status: "pending", valid_until: null }],
       { onConflict: ["id"] }
     );
 
@@ -64,28 +64,27 @@ app.get("/status-pix/:id", async (req, res) => {
   res.json({ status: data?.status || "pending" });
 });
 
-// Checa status VIP pelo email
+// Checa VIP pelo email (aprovado e dentro do prazo)
 app.get("/check-vip/:email", async (req, res) => {
   const email = req.params.email;
   if (!email) return res.status(400).json({ error: "Faltando email" });
 
+  const now = new Date();
   const { data, error } = await supabase
-    .from("vip_users")
-    .select("vip_expires_at")
+    .from("pagamentos")
+    .select("valid_until")
     .eq("email", email)
+    .eq("status", "approved")
+    .gt("valid_until", now.toISOString())
+    .order("valid_until", { ascending: false })
+    .limit(1)
     .single();
 
   if (error && error.code !== "PGRST116") {
     return res.status(500).json({ error: error.message });
   }
 
-  const now = new Date();
-  let vip = false;
-  if (data && new Date(data.vip_expires_at) > now) {
-    vip = true;
-  }
-
-  res.json({ vip });
+  res.json({ vip: !!data });
 });
 
 // Webhook Mercado Pago
@@ -98,49 +97,31 @@ app.post("/webhook", async (req, res) => {
     console.log("============================");
 
     const paymentId = req.body?.data?.id || req.query["data.id"];
-    if (!paymentId) {
-      console.log("❌ Webhook sem paymentId:", req.body);
-      return res.sendStatus(400);
-    }
+    if (!paymentId) return res.sendStatus(400);
 
-    console.log("🔎 Buscando detalhes do pagamento:", paymentId);
     const paymentDetails = await payment.get({ id: paymentId });
 
-    console.log("📌 Detalhes do pagamento:", JSON.stringify(paymentDetails, null, 2));
-
     // Atualiza status no Supabase
+    const status = paymentDetails.status;
+    let valid_until = null;
+
+    if (["approved", "paid"].includes(status.toLowerCase())) {
+      const vipExpires = new Date();
+      vipExpires.setDate(vipExpires.getDate() + 30); // 30 dias
+      valid_until = vipExpires.toISOString();
+    }
+
     const { error: updateError } = await supabase
       .from("pagamentos")
-      .update({ status: paymentDetails.status })
+      .update({ status, valid_until })
       .eq("id", paymentId);
 
-    if (updateError) {
-      console.error("❌ Erro ao atualizar Supabase:", updateError.message);
-    } else {
-      console.log(`✅ Supabase atualizado: ${paymentId} -> ${paymentDetails.status}`);
-    }
-
-    // Se pago/aprovado, ativa ou renova VIP por 30 dias
-    if (["approved", "paid"].includes(paymentDetails.status.toLowerCase())) {
-      const email = paymentDetails.payer.email;
-      const vipExpiresAt = new Date();
-      vipExpiresAt.setDate(vipExpiresAt.getDate() + 30);
-
-      const { error: vipError } = await supabase.from("vip_users").upsert(
-        [{ email, vip_expires_at: vipExpiresAt.toISOString() }],
-        { onConflict: ["email"] }
-      );
-
-      if (vipError) {
-        console.error("❌ Erro ao salvar VIP:", vipError.message);
-      } else {
-        console.log(`🎉 VIP ativado/renovado para ${email} até ${vipExpiresAt}`);
-      }
-    }
+    if (updateError) console.error("Erro ao atualizar Supabase:", updateError.message);
+    else console.log(`Pagamento ${paymentId} atualizado: status=${status}, valid_until=${valid_until}`);
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Erro no webhook:", err.message);
+    console.error("Erro no webhook:", err.message);
     res.sendStatus(500);
   }
 });
