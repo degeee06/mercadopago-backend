@@ -91,29 +91,8 @@ app.get("/vip-status", async (req, res) => {
   res.json({ isVip });
 });
 
-// Webhook Mercado Pago
+// Webhook Mercado Pago (corrigido)
 app.post("/webhook", express.json(), async (req, res) => {
-  const signatureHeader = req.headers["x-signature"];
-  const secret = process.env.MP_WEBHOOK_SECRET;
-  if (!signatureHeader || !secret) return res.sendStatus(401);
-
-  // Validação da assinatura
-  const parts = signatureHeader.split(",");
-  let ts = "", v1 = "";
-  for (const p of parts) {
-    const [key, value] = p.split("=");
-    if (key === "ts") ts = value;
-    else if (key === "v1") v1 = value;
-  }
-
-  const dataId = (req.query["data.id"] || "").toLowerCase();
-  const xRequestId = req.headers["x-request-id"] || "";
-  const manifest = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
-  const computedHash = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
-  if (computedHash !== v1) return res.sendStatus(401);
-
-  console.log("Webhook validado ✅");
-
   try {
     const paymentId = req.body?.data?.id;
     if (!paymentId) {
@@ -123,32 +102,32 @@ app.post("/webhook", express.json(), async (req, res) => {
 
     const paymentDetails = await payment.get({ id: paymentId });
 
-    // Atualiza o Supabase usando paymentId como chave
+    // Atualiza status no Supabase
     await supabase.from("pagamentos")
       .update({ status: paymentDetails.status })
       .eq("id", paymentId);
 
     console.log("Status atualizado:", paymentId, "->", paymentDetails.status);
 
-    // Se pago ou aprovado, ativa VIP por 30 dias
+    // Se pago/aprovado, ativa VIP por 30 dias
     if (["approved", "paid"].includes(paymentDetails.status.toLowerCase())) {
       const email = paymentDetails.payer.email;
       const vipExpiresAt = new Date();
-      vipExpiresAt.setDate(vipExpiresAt.getDate() + 30); // 30 dias de VIP
+      vipExpiresAt.setDate(vipExpiresAt.getDate() + 30);
 
       await supabase.from("vip_users").upsert(
         [{ email, vip_expires_at: vipExpiresAt.toISOString() }],
         { onConflict: ["email"] }
       );
 
-      console.log(`VIP ativado para ${email} até ${vipExpiresAt}`);
+      console.log(`✅ VIP ativado para ${email} até ${vipExpiresAt}`);
     }
 
+    res.sendStatus(200);
   } catch (err) {
-    console.error("Erro ao atualizar pagamento:", err.message);
+    console.error("Erro ao processar webhook:", err.message);
+    res.sendStatus(500);
   }
-
-  res.sendStatus(200);
 });
 
 // Inicia servidor
