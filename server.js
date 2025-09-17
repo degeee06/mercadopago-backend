@@ -56,14 +56,6 @@ app.post("/create-pix", async (req, res) => {
   }
 });
 
-// Checa status do pagamento (via Supabase)
-app.get("/status-pix/:id", async (req, res) => {
-  const id = req.params.id;
-  const { data, error } = await supabase.from("pagamentos").select("status").eq("id", id).single();
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ status: data?.status || "pending" });
-});
-
 // Checa VIP pelo email (aprovado e dentro do prazo)
 app.get("/check-vip/:email", async (req, res) => {
   const email = req.params.email;
@@ -84,21 +76,15 @@ app.get("/check-vip/:email", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
- res.json({ 
-  vip: !!data,
-  valid_until: data?.valid_until || null
+  res.json({
+    vip: !!data,
+    valid_until: data?.valid_until || null
+  });
 });
-
 
 // Webhook Mercado Pago
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("===== WEBHOOK RECEBIDO =====");
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Query:", JSON.stringify(req.query, null, 2));
-    console.log("Body:", JSON.stringify(req.body, null, 2));
-    console.log("============================");
-
     const paymentId = req.body?.data?.id || req.query["data.id"];
     if (!paymentId) return res.sendStatus(400);
 
