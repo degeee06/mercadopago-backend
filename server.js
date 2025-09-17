@@ -72,6 +72,38 @@ app.post("/create_preference", async (req, res) => {
   }
 });
 
+
+// rota de verificação VIP
+app.get("/check-vip/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const { data, error } = await supabase
+      .from("pagamentos")
+      .select("valid_until")
+      .eq("email", email)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      console.error("Erro Supabase:", error);
+      return res.status(500).json({ error: "Erro ao checar VIP" });
+    }
+
+    const isVip =
+      data && data.valid_until && new Date(data.valid_until) > new Date();
+
+    res.json({ vip: !!isVip });
+  } catch (err) {
+    console.error("Erro backend /check-vip:", err);
+    res.status(500).json({ error: "Erro interno no servidor" });
+  }
+});
+
+
+
 // Webhook Mercado Pago
 app.post("/webhook", async (req, res) => {
   try {
