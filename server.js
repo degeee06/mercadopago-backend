@@ -84,8 +84,11 @@ app.get("/check-vip/:email", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  res.json({ vip: !!data });
+ res.json({ 
+  vip: !!data,
+  valid_until: data?.valid_until || null
 });
+
 
 // Webhook Mercado Pago
 app.post("/webhook", async (req, res) => {
